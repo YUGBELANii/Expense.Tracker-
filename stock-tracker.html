@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stock ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#15241c;--leaf:#1e5b3f;--paper:#f5f7f3;--card:#fff;--line:#dde4dc;--gold:#d9a21b;--loss:#b3412e;--muted:#5d6d63}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:"Bricolage Grotesque",system-ui,sans-serif;font-variant-numeric:tabular-nums;line-height:1.45}
+main{max-width:1100px;margin:0 auto;padding:20px 16px 60px}
+header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+h1{font-size:1.7rem;font-weight:800;margin:0;letter-spacing:-.02em}
+.mode{font-size:.85rem;color:var(--muted)}
+button,input,select{font:inherit}
+:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+.btn{background:var(--leaf);color:#fff;border:0;border-radius:8px;padding:10px 16px;font-weight:600;cursor:pointer}
+.btn.ghost{background:transparent;color:var(--leaf);border:1.5px solid var(--leaf)}
+.btn.small{padding:5px 10px;font-size:.85rem}
+.btn.danger{color:var(--loss);border-color:var(--loss)}
+.totals{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:20px 0 10px}
+.tot{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;border-left:8px solid var(--leaf)}
+.tot.profit{border-left-color:var(--gold)}
+.tot.mrp{border-left-color:var(--line)}
+.tot span{display:block;color:var(--muted);font-size:.9rem}
+.tot b{font-size:1.9rem;font-weight:800;letter-spacing:-.02em}
+.tot small{color:var(--muted)}
+.bar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--line);margin:4px 0 6px}
+.bar i{display:block}
+.barnote{font-size:.85rem;color:var(--muted);margin:0 0 22px}
+.tools{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.tools input{flex:1;min-width:180px;padding:10px 12px;border:1.5px solid var(--line);border-radius:8px;background:#fff}
+.wrap{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;min-width:860px}
+th,td{padding:10px 12px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{font-weight:600;font-size:.88rem;color:var(--muted);background:#fafcf9}
+td.name small{display:block;color:var(--muted)}
+.pos{color:var(--leaf);font-weight:600}
+.neg{color:var(--loss);font-weight:600}
+.act{display:flex;gap:6px;justify-content:flex-end}
+.empty{padding:36px 16px;text-align:center;color:var(--muted)}
+.empty p{margin:0 0 14px}
+.status{margin:10px 0;color:var(--loss);min-height:1.3em}
+dialog{border:0;border-radius:12px;padding:0;width:min(520px,94vw);box-shadow:0 20px 60px rgba(0,0,0,.3)}
+dialog::backdrop{background:rgba(21,36,28,.5)}
+.f{padding:20px}
+.f h2{margin:0 0 14px;font-size:1.25rem}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.grid .full{grid-column:1/-1}
+label{display:block;font-size:.88rem;color:var(--muted)}
+label input,label select{display:block;width:100%;margin-top:4px;padding:9px 10px;border:1.5px solid var(--line);border-radius:8px;color:var(--ink);background:#fff}
+.preview{margin:16px 0;padding:12px 14px;background:var(--paper);border-radius:8px;display:grid;grid-template-columns:1fr auto;gap:4px 12px;font-size:.95rem}
+.preview b{text-align:right}
+.err{color:var(--loss);font-size:.9rem;min-height:1.3em;margin:0 0 8px}
+.row{display:flex;gap:10px;justify-content:flex-end}
+@media (max-width:520px){.grid{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:no-preference){.bar i{transition:width .4s}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>Stock ledger</h1>
+  <span class="mode" id="mode"></span>
+</header>
+
+<section class="totals" aria-label="Totals">
+  <div class="tot"><span>Total invested</span><b id="tInv">₹0</b></div>
+  <div class="tot profit"><span>Total profit (if all stock sells)</span><b id="tProfit">₹0</b></div>
+  <div class="tot mrp"><span>Total stock MRP</span><b id="tMrp">₹0</b><br><small id="mrpNote"></small></div>
+</section>
+<div class="bar" id="bar" role="img" aria-label="Split of stock MRP into invested, profit and customer discount"></div>
+<p class="barnote">Green is what you paid, gold is your profit, grey is the discount customers get against MRP.</p>
+
+<div class="tools">
+  <input id="q" type="search" placeholder="Search product or category" aria-label="Search products">
+  <button class="btn" id="add">Add product</button>
+</div>
+<div class="status" id="status" role="alert"></div>
+<div class="wrap"><table>
+  <thead><tr><th>Product</th><th>Qty</th><th>Buy</th><th>Sell</th><th>MRP</th><th>Invested</th><th>Sell value</th><th>Profit</th><th>MRP value</th><th></th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<div class="empty" id="empty" hidden>
+  <p>No products yet. Add one to see invested, profit and MRP totals.</p>
+  <button class="btn ghost" id="sample">Load 6 sample products</button>
+</div></div>
+</main>
+
+<dialog id="dlg">
+<form class="f" id="form" novalidate>
+  <h2 id="dtitle">Add product</h2>
+  <div class="grid">
+    <label class="full">Product name<input name="name" required maxlength="80"></label>
+    <label>Category<input name="category" list="cats" placeholder="Rice &amp; grains"></label>
+    <label>Unit<select name="unit"><option>kg</option><option>pack</option><option>pcs</option><option>litre</option><option>dozen</option></select></label>
+    <label>Buy price (per unit)<input name="buy_price" type="number" min="0" step="0.01" inputmode="decimal" required></label>
+    <label>Sell price (per unit)<input name="sell_price" type="number" min="0" step="0.01" inputmode="decimal" required></label>
+    <label>MRP (leave empty for loose items)<input name="mrp" type="number" min="0" step="0.01" inputmode="decimal"></label>
+    <label>Quantity in stock<input name="quantity" type="number" min="0" step="0.001" inputmode="decimal" required></label>
+  </div>
+  <datalist id="cats"><option>Rice &amp; grains</option><option>Pulses</option><option>Oil &amp; ghee</option><option>Spices</option><option>Snacks</option><option>Vegetables</option><option>Dairy</option></datalist>
+  <div class="preview" id="preview"></div>
+  <p class="err" id="err"></p>
+  <div class="row"><button type="button" class="btn ghost" id="cancel">Cancel</button><button class="btn" type="submit">Save product</button></div>
+</form>
+</dialog>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+// Paste your Supabase project values here. Leave empty to run in demo mode (saved in this browser only).
+const SUPABASE_URL = 'https://jgnqxczcgzqydjkwtrqi.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_AfwTCbECHnCaGRDSI9S8fg_Ek_ioaSG';
+
+const sb = (SUPABASE_URL && SUPABASE_KEY && window.supabase) ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+const LS = 'grocery-stock-v1';
+const $ = id => document.getElementById(id);
+const inr = n => '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const store = {
+  readLocal() { try { return JSON.parse(localStorage.getItem(LS)) || []; } catch { return []; } },
+  writeLocal(a) { try { localStorage.setItem(LS, JSON.stringify(a)); } catch { throw new Error('Browser storage is blocked, so nothing can be saved.'); } },
+  async list() {
+    if (!sb) return this.readLocal();
+    const { data, error } = await sb.from('products').select('*').order('name');
+    if (error) throw error;
+    return data;
+  },
+  async save(p) {
+    if (sb) {
+      const { error } = p.id ? await sb.from('products').update(p).eq('id', p.id) : await sb.from('products').insert(p);
+      if (error) throw error;
+      return;
+    }
+    const all = this.readLocal();
+    if (p.id) { const i = all.findIndex(x => x.id === p.id); all[i] = { ...all[i], ...p }; }
+    else all.push({ ...p, id: crypto.randomUUID() });
+    this.writeLocal(all);
+  },
+  async saveMany(arr) {
+    if (sb) { const { error } = await sb.from('products').insert(arr); if (error) throw error; return; }
+    this.writeLocal([...this.readLocal(), ...arr.map(p => ({ ...p, id: crypto.randomUUID() }))]);
+  },
+  async remove(id) {
+    if (sb) { const { error } = await sb.from('products').delete().eq('id', id); if (error) throw error; return; }
+    this.writeLocal(this.readLocal().filter(x => x.id !== id));
+  }
+};
+
+function calc(p) {
+  const q = +p.quantity || 0, buy = +p.buy_price || 0, sell = +p.sell_price || 0;
+  const hasMrp = p.mrp !== null && p.mrp !== '' && p.mrp !== undefined;
+  const invested = buy * q, sellValue = sell * q, profit = sellValue - invested;
+  return { invested, sellValue, profit, margin: invested ? profit / invested * 100 : 0, hasMrp, mrpValue: hasMrp ? +p.mrp * q : 0 };
+}
+
+let products = [];
+
+function render() {
+  const term = $('q').value.trim().toLowerCase();
+  const shown = products.filter(p => (p.name + ' ' + (p.category || '')).toLowerCase().includes(term));
+  let inv = 0, profit = 0, mrp = 0, noMrp = 0;
+  products.forEach(p => { const c = calc(p); inv += c.invested; profit += c.profit; mrp += c.mrpValue; if (!c.hasMrp) noMrp++; });
+  $('tInv').textContent = inr(inv);
+  $('tProfit').textContent = inr(profit);
+  $('tProfit').className = profit < 0 ? 'neg' : '';
+  $('tMrp').textContent = inr(mrp);
+  $('mrpNote').textContent = noMrp ? noMrp + ' loose item' + (noMrp > 1 ? 's' : '') + ' without MRP not counted' : '';
+
+  const base = Math.max(mrp, inv + Math.max(profit, 0)) || 1;
+  const w = v => Math.max(v, 0) / base * 100;
+  const rest = Math.max(base - inv - Math.max(profit, 0), 0);
+  $('bar').innerHTML = `<i style="width:${w(inv)}%;background:var(--leaf)"></i><i style="width:${w(Math.max(profit, 0))}%;background:var(--gold)"></i><i style="width:${w(rest)}%"></i>`;
+
+  $('rows').innerHTML = shown.map(p => {
+    const c = calc(p), cls = c.profit < 0 ? 'neg' : 'pos';
+    return `<tr>
+      <td class="name">${esc(p.name)}<small>${esc(p.category || 'Uncategorised')}</small></td>
+      <td>${+p.quantity} ${esc(p.unit)}</td>
+      <td>${inr(p.buy_price)}</td><td>${inr(p.sell_price)}</td><td>${c.hasMrp ? inr(p.mrp) : '–'}</td>
+      <td>${inr(c.invested)}</td><td>${inr(c.sellValue)}</td>
+      <td class="${cls}">${inr(c.profit)} <small>(${c.margin.toFixed(1)}%)</small></td>
+      <td>${c.hasMrp ? inr(c.mrpValue) : '–'}</td>
+      <td><div class="act"><button class="btn ghost small" data-edit="${esc(p.id)}">Edit</button><button class="btn ghost small danger" data-del="${esc(p.id)}">Delete</button></div></td>
+    </tr>`;
+  }).join('');
+  $('empty').hidden = products.length > 0;
+}
+
+async function refresh() {
+  try { products = await store.list(); $('status').textContent = ''; }
+  catch (e) { $('status').textContent = 'Could not load products: ' + e.message; }
+  render();
+}
+
+// Form
+const form = $('form'), dlg = $('dlg');
+let editId = null;
+const num = v => v === '' ? null : Number(v);
+
+function preview() {
+  const d = Object.fromEntries(new FormData(form));
+  const c = calc({ quantity: d.quantity, buy_price: d.buy_price, sell_price: d.sell_price, mrp: d.mrp });
+  const perUnit = (+d.sell_price || 0) - (+d.buy_price || 0);
+  $('preview').innerHTML = `
+    <span>Cost of investing</span><b>${inr(c.invested)}</b>
+    <span>Selling value</span><b>${inr(c.sellValue)}</b>
+    <span>Profit (${c.margin.toFixed(1)}%)</span><b class="${c.profit < 0 ? 'neg' : 'pos'}">${inr(c.profit)}</b>
+    <span>Profit per unit</span><b>${inr(perUnit)}</b>
+    <span>Value at MRP</span><b>${c.hasMrp ? inr(c.mrpValue) : '–'}</b>`;
+}
+
+function openForm(p) {
+  editId = p ? p.id : null;
+  $('dtitle').textContent = p ? 'Edit product' : 'Add product';
+  form.reset();
+  if (p) for (const k of ['name', 'category', 'unit', 'buy_price', 'sell_price', 'mrp', 'quantity']) form.elements[k].value = p[k] ?? '';
+  $('err').textContent = '';
+  preview();
+  dlg.showModal();
+}
+
+form.addEventListener('input', preview);
+$('add').onclick = () => openForm(null);
+$('cancel').onclick = () => dlg.close();
+$('q').addEventListener('input', render);
+
+form.addEventListener('submit', async e => {
+  e.preventDefault();
+  const d = Object.fromEntries(new FormData(form));
+  const p = { name: d.name.trim(), category: d.category.trim(), unit: d.unit, buy_price: num(d.buy_price), sell_price: num(d.sell_price), mrp: num(d.mrp), quantity: num(d.quantity) };
+  if (!p.name) return $('err').textContent = 'Enter the product name.';
+  if (p.buy_price === null || p.sell_price === null || p.quantity === null) return $('err').textContent = 'Fill in buy price, sell price and quantity.';
+  if (p.mrp !== null && p.sell_price > p.mrp) return $('err').textContent = 'Sell price is above MRP. Selling packaged goods above MRP is not allowed, so lower the sell price.';
+  if (p.sell_price < p.buy_price && !confirm('Sell price is below buy price, so you lose money on every unit. Save anyway?')) return;
+  if (editId) p.id = editId;
+  try { await store.save(p); dlg.close(); await refresh(); }
+  catch (er) { $('err').textContent = 'Could not save: ' + er.message; }
+});
+
+$('rows').addEventListener('click', async e => {
+  const ed = e.target.dataset.edit, del = e.target.dataset.del;
+  if (ed) openForm(products.find(p => String(p.id) === ed));
+  if (del && confirm('Delete this product? This cannot be undone.')) {
+    try { await store.remove(del); await refresh(); } catch (er) { $('status').textContent = 'Could not delete: ' + er.message; }
+  }
+});
+
+$('sample').onclick = async () => {
+  try {
+    await store.saveMany([
+      { name: 'Basmati rice', category: 'Rice & grains', unit: 'kg', buy_price: 82, sell_price: 95, mrp: 110, quantity: 50 },
+      { name: 'Toor dal', category: 'Pulses', unit: 'kg', buy_price: 128, sell_price: 142, mrp: 160, quantity: 30 },
+      { name: 'Sunflower oil 1L', category: 'Oil & ghee', unit: 'pack', buy_price: 118, sell_price: 126, mrp: 135, quantity: 40 },
+      { name: 'Turmeric powder 200g', category: 'Spices', unit: 'pack', buy_price: 38, sell_price: 46, mrp: 55, quantity: 60 },
+      { name: 'Potato', category: 'Vegetables', unit: 'kg', buy_price: 18, sell_price: 24, mrp: null, quantity: 80 },
+      { name: 'Milk 500ml', category: 'Dairy', unit: 'pack', buy_price: 26, sell_price: 28, mrp: 29, quantity: 100 }
+    ]);
+    await refresh();
+  } catch (er) { $('status').textContent = 'Could not add samples: ' + er.message; }
+};
+
+$('mode').textContent = sb ? 'Connected to Supabase' : 'Demo mode: saved in this browser only';
+refresh();
+</script>
+</body>
+</html>
