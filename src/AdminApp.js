@@ -56,7 +56,8 @@ const emptyProduct = () => ({
   supplier: '',
   invoice: '',
   purchase_date: today(),
-  notes: ''
+  notes: '',
+  brand_id: ''
 });
 
 function Login() {
@@ -180,6 +181,37 @@ export default function AdminApp() {
   const [productForm, setProductForm] = useState(emptyProduct());
   const [productFormOpen, setProductFormOpen] = useState(false);
   const [productSaving, setProductSaving] = useState(false);
+  const [brands, setBrands] = useState([]);
+
+  // Manufacturer assigner
+  const [maManufacturerId, setMaManufacturerId] = useState('');
+  const [maBrandId, setMaBrandId] = useState('');
+  const [maProductSearch, setMaProductSearch] = useState('');
+  const [maStatusFilter, setMaStatusFilter] = useState('all');
+  const [maSelectedIds, setMaSelectedIds] = useState(new Set());
+  const [maSaving, setMaSaving] = useState(false);
+  const [maPreviewOpen, setMaPreviewOpen] = useState(false);
+  const [maNewBrandName, setMaNewBrandName] = useState('');
+  const [maCreatingBrand, setMaCreatingBrand] = useState(false);
+
+  // Shelf-life calculator / batches
+  const [shelfForm, setShelfForm] = useState({
+    productId: '',
+    batchNo: '',
+    mfd: '',
+    exp: ''
+  });
+  const [shelfResult, setShelfResult] = useState(null);
+  const [shelfError, setShelfError] = useState('');
+  const [shelfSaving, setShelfSaving] = useState(false);
+  const [shelfBatches, setShelfBatches] = useState([]);
+  const [shelfBatchesLoading, setShelfBatchesLoading] = useState(false);
+  const [shelfBatchSearch, setShelfBatchSearch] = useState('');
+
+  // Manufacturers
+  const [manufacturers, setManufacturers] = useState([]);
+  const [manufacturerForm, setManufacturerForm] = useState({ id: null, name: '', registered_address: '', customer_care: '', website: '' });
+  const [manufacturerSaving, setManufacturerSaving] = useState(false);
 
   // Authentication
   useEffect(() => {
@@ -203,6 +235,24 @@ export default function AdminApp() {
   const user = session?.user;
   const allowed = !!session && isAdminUser(user);
 
+  const loadShelfBatches = useCallback(async () => {
+    if (!sb || !allowed) return;
+    setShelfBatchesLoading(true);
+    try {
+      const data = await ok(
+        sb.from('product_shelf_batches')
+          .select('id, product_id, batch_number, manufacturing_date, expiry_date, total_shelf_life_days, created_at, updated_at, products(name)')
+          .order('created_at', { ascending: false })
+          .limit(2000)
+      );
+      setShelfBatches(data || []);
+    } catch (e) {
+      setShelfBatches([]);
+    } finally {
+      setShelfBatchesLoading(false);
+    }
+  }, [allowed]);
+
   // Load all admin data
   const loadAll = useCallback(async () => {
     if (!sb || !allowed) return;
@@ -223,9 +273,7 @@ export default function AdminApp() {
     try {
       const [ps, ss, rs, pays, productRows] = await Promise.all([
         ok(sb.from('delivery_partners').select('*').order('created_at')),
-
         ok(sb.from('delivery_settings').select('*').eq('id', 1)),
-
         ok(
           sb.from('delivery_records')
             .select('*')
@@ -235,7 +283,6 @@ export default function AdminApp() {
             .order('created_at', { ascending: false })
             .limit(5000)
         ),
-
         ok(
           sb.from('delivery_payments')
             .select('*')
@@ -245,7 +292,6 @@ export default function AdminApp() {
             .order('created_at', { ascending: false })
             .limit(5000)
         ),
-
         ok(sb.from('products').select('*').order('name'))
       ]);
 
@@ -259,6 +305,19 @@ export default function AdminApp() {
       if (!selectedPartner && ps.length) {
         setSelectedPartner(ps[0].id);
       }
+      await loadShelfBatches();
+      try {
+        const mans = await ok(sb.from('manufacturers').select('*').order('name'));
+        setManufacturers(mans || []);
+      } catch (_e) {
+        setManufacturers([]);
+      }
+      try {
+        const brs = await ok(sb.from('brands').select('id,name,manufacturer_id').order('name'));
+        setBrands(brs || []);
+      } catch (_e) {
+        setBrands([]);
+      }
     } catch (e) {
       setErr(
         e.message ||
@@ -267,7 +326,7 @@ export default function AdminApp() {
     } finally {
       setLoading(false);
     }
-  }, [allowed, month, selectedPartner]);
+  }, [allowed, month, selectedPartner, loadShelfBatches]);
 
   useEffect(() => {
     if (allowed) loadAll();
@@ -307,7 +366,8 @@ export default function AdminApp() {
         supplier: product.supplier || '',
         invoice: product.invoice || '',
         purchase_date: product.purchase_date || '',
-        notes: product.notes || ''
+        notes: product.notes || '',
+        brand_id: product.brand_id || ''
       });
     } else {
       setProductForm(emptyProduct());
@@ -391,7 +451,8 @@ export default function AdminApp() {
       supplier: f.supplier.trim() || null,
       invoice: f.invoice.trim() || null,
       purchase_date: f.purchase_date || null,
-      notes: f.notes.trim() || null
+      notes: f.notes.trim() || null,
+      brand_id: f.brand_id || null
     };
 
     setProductSaving(true);
@@ -716,6 +777,43 @@ export default function AdminApp() {
   const monthPayments = payments;
   const done = monthRecords.filter(r => r.status === 'completed');
 
+  const shelfBatchesFiltered = (() => {
+    const term = (shelfBatchSearch || '').trim().toLowerCase();
+    return shelfBatches.filter(b => {
+      const pname = (b.products?.name || (products.find(p => String(p.id) === String(b.product_id)) || {}).name || '').toLowerCase();
+      const bno = (b.batch_number || '').toLowerCase();
+      const matchesTerm = !term || pname.includes(term) || bno.includes(term);
+      const matchesSelected = !shelfForm.productId || String(b.product_id) === String(shelfForm.productId);
+      return matchesTerm && matchesSelected;
+    });
+  })();
+
+  function shelfBatchStatus(expiryDate) {
+    const exp = new Date(String(expiryDate) + 'T00:00:00');
+    const t = new Date(today() + 'T00:00:00');
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const rem = Math.round((exp - t) / msPerDay);
+    if (rem < 0) return { label: 'Expired', rem };
+    if (rem <= 30) return { label: 'Expiring Soon', rem };
+    return { label: 'Valid', rem };
+  }
+
+  const maBrands = useMemo(() => {
+    if (!maManufacturerId) return [];
+    return brands.filter(b => String(b.manufacturer_id || '') === String(maManufacturerId));
+  }, [brands, maManufacturerId]);
+
+  const maProductsFiltered = useMemo(() => {
+    const term = (maProductSearch || '').trim().toLowerCase();
+    return products.filter(p => {
+      if (term && !(p.name || '').toLowerCase().includes(term)) return false;
+      if (maStatusFilter === 'unassigned' && p.brand_id) return false;
+      if (maStatusFilter === 'assignedToSelected' && String(p.brand_id || '') !== String(maBrandId || '')) return false;
+      if (maStatusFilter === 'assignedOther' && (!p.brand_id || String(p.brand_id) === String(maBrandId || ''))) return false;
+      return true;
+    });
+  }, [products, maProductSearch, maStatusFilter, maBrandId]);
+
   // ---------------------------------
   // AUTHORIZATION SCREENS
   // ---------------------------------
@@ -769,7 +867,221 @@ export default function AdminApp() {
   }
 
   // ---------------------------------
-  // ADMIN UI
+  // SHELF-LIFE CALCULATOR
+  // ---------------------------------
+  function extractBrand(name) {
+    return (name || '').trim().split(/\s+/)[0] || '';
+  }
+
+  function calcShelfLife(e) {
+    e.preventDefault();
+    setShelfError('');
+    setShelfResult(null);
+
+    const prod = products.find(p => String(p.id) === String(shelfForm.productId));
+    if (!prod) {
+      setShelfError('Please select a valid existing product.');
+      return;
+    }
+    const batchNo = (shelfForm.batchNo || '').trim();
+    if (!batchNo) {
+      setShelfError('Batch number is required.');
+      return;
+    }
+    if (!shelfForm.mfd) {
+      setShelfError('Manufacturing date (MFD) is required.');
+      return;
+    }
+    if (!shelfForm.exp) {
+      setShelfError('Expiry date (EXP) is required.');
+      return;
+    }
+
+    const mfdDate = new Date(shelfForm.mfd + 'T00:00:00');
+    const expDate = new Date(shelfForm.exp + 'T00:00:00');
+    const todayDate = new Date(today() + 'T00:00:00');
+
+    if (Number.isNaN(mfdDate.getTime()) || Number.isNaN(expDate.getTime())) {
+      setShelfError('Invalid date value.');
+      return;
+    }
+    if (mfdDate > todayDate) {
+      setShelfError('Manufacturing date cannot be in the future.');
+      return;
+    }
+    if (expDate < mfdDate) {
+      setShelfError('Expiry date cannot be earlier than manufacturing date.');
+      return;
+    }
+
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const totalDays = Math.round((expDate - mfdDate) / msPerDay);
+    const remainingDays = Math.round((expDate - todayDate) / msPerDay);
+
+    let status = 'Valid';
+    if (remainingDays < 0) status = 'Expired';
+    else if (remainingDays <= 30) status = 'Expiring Soon';
+
+    const brand = extractBrand(prod.name);
+    const result = {
+      productId: prod.id,
+      productName: prod.name || '',
+      brand,
+      batchNo,
+      mfd: shelfForm.mfd,
+      exp: shelfForm.exp,
+      totalShelfLifeDays: totalDays,
+      remainingShelfLifeDays: remainingDays,
+      status
+    };
+    setShelfResult(result);
+  }
+
+  async function saveShelfBatch() {
+    setShelfError('');
+    if (!shelfResult) {
+      setShelfError('Calculate shelf life first before saving.');
+      return;
+    }
+    setShelfSaving(true);
+    try {
+      if (!sb) throw new Error('Supabase is not configured.');
+      await ok(
+        sb.from('product_shelf_batches').insert({
+          product_id: shelfResult.productId,
+          batch_number: shelfResult.batchNo,
+          manufacturing_date: shelfResult.mfd,
+          expiry_date: shelfResult.exp,
+          total_shelf_life_days: shelfResult.totalShelfLifeDays
+        })
+      );
+      setMsg('Batch saved successfully.');
+      setTimeout(() => setMsg(''), 3000);
+      await loadShelfBatches();
+    } catch (er) {
+      const msgText = (er && er.message) ? er.message : String(er);
+      if (msgText.includes('duplicate key') || msgText.includes('unique') || er?.code === '23505') {
+        setShelfError('Duplicate batch: this batch number already exists for the selected product.');
+      } else {
+        setShelfError('Failed to save batch: ' + msgText);
+      }
+    } finally {
+      setShelfSaving(false);
+    }
+  }
+
+  async function saveManufacturer(e) {
+    e.preventDefault();
+    setErr('');
+    if (!manufacturerForm.name.trim()) {
+      setErr('Manufacturer name is required.');
+      return;
+    }
+    setManufacturerSaving(true);
+    try {
+      const payload = {
+        name: manufacturerForm.name.trim(),
+        registered_address: manufacturerForm.registered_address.trim() || null,
+        customer_care: manufacturerForm.customer_care.trim() || null,
+        website: manufacturerForm.website.trim() || null
+      };
+      if (manufacturerForm.id) {
+        await ok(sb.from('manufacturers').update(payload).eq('id', manufacturerForm.id));
+        setMsg('Manufacturer updated.');
+      } else {
+        await ok(sb.from('manufacturers').insert(payload));
+        setMsg('Manufacturer created.');
+      }
+      setTimeout(() => setMsg(''), 3000);
+      setManufacturerForm({ id: null, name: '', registered_address: '', customer_care: '', website: '' });
+      const mans = await ok(sb.from('manufacturers').select('*').order('name'));
+      setManufacturers(mans || []);
+    } catch (er) {
+      setErr('Failed to save manufacturer: ' + (er.message || er));
+    } finally {
+      setManufacturerSaving(false);
+    }
+  }
+
+  async function createMaBrand() {
+    setErr('');
+    const name = (maNewBrandName || '').trim();
+    if (!maManufacturerId) { setErr('Select a manufacturer first.'); return; }
+    if (!name) { setErr('Enter a brand name.'); return; }
+    setMaCreatingBrand(true);
+    try {
+      const { data, error } = await sb.from('brands').insert({ name, manufacturer_id: maManufacturerId }).select('id,name,manufacturer_id').single();
+      if (error) throw error;
+      setBrands(prev => [...prev, data].sort((a,b) => (a.name||'').localeCompare(b.name||'')));
+      setMaBrandId(data.id);
+      setMaNewBrandName('');
+      setMsg('Brand created and selected.');
+      setTimeout(() => setMsg(''), 3000);
+    } catch (e) {
+      setErr('Failed to create brand: ' + (e.message || e));
+    } finally {
+      setMaCreatingBrand(false);
+    }
+  }
+
+  function openMaPreview() {
+    setErr('');
+    if (!maManufacturerId) { setErr('Select a manufacturer first.'); return; }
+    if (maSelectedIds.size === 0) { setErr('Select at least one product to assign.'); return; }
+    setMaPreviewOpen(true);
+  }
+
+  async function applyManufacturerAssignments() {
+    if (maSaving) return;
+    const ids = Array.from(maSelectedIds);
+    if (ids.length === 0) { setErr('No products selected.'); return; }
+    setMaSaving(true);
+    setErr('');
+    let okCount = 0;
+    let failCount = 0;
+    try {
+      let targetBrandId = maBrandId || null;
+      if (!targetBrandId && maManufacturerId) {
+        // Find or create a default brand for this manufacturer
+        const m = manufacturers.find(x => String(x.id) === String(maManufacturerId));
+        const defaultName = m?.name ? `${m.name} (Default)` : 'Default Brand';
+        let existing = brands.find(b => String(b.manufacturer_id || '') === String(maManufacturerId) && (b.name || '').toLowerCase() === defaultName.toLowerCase());
+        if (!existing) {
+          // try any brand with same name as manufacturer
+          existing = brands.find(b => String(b.manufacturer_id || '') === String(maManufacturerId) && (b.name || '').toLowerCase() === (m?.name || '').toLowerCase());
+        }
+        if (existing) {
+          targetBrandId = existing.id;
+        } else {
+          const { data: newBrand, error: be } = await sb.from('brands').insert({ name: defaultName, manufacturer_id: maManufacturerId }).select('id,name,manufacturer_id').single();
+          if (be) throw be;
+          targetBrandId = newBrand.id;
+          // refresh brands list locally
+          setBrands(prev => [...prev, newBrand].sort((a,b) => (a.name||'').localeCompare(b.name||'')));
+        }
+      }
+      for (const pid of ids) {
+        try {
+          await ok(sb.from('products').update({ brand_id: targetBrandId }).eq('id', pid));
+          okCount++;
+        } catch (_e) {
+          failCount++;
+        }
+      }
+      setMsg(targetBrandId ? `Assigned ${okCount} product(s) (brand set). Failed: ${failCount}.` : `Unassigned ${okCount} product(s). Failed: ${failCount}.`);
+      setTimeout(() => setMsg(''), 4000);
+      setMaSelectedIds(new Set());
+      setMaPreviewOpen(false);
+      await loadAll();
+    } catch (e) {
+      setErr('Bulk assignment failed: ' + (e.message || e));
+    } finally {
+      setMaSaving(false);
+    }
+  }
+
+  // ---------------------------------
+  // AUTHORIZATION SCREENS
   // ---------------------------------
 
   return (
@@ -801,6 +1113,9 @@ export default function AdminApp() {
         {[
           ['partners', 'Partners'],
           ['products', 'Products'],
+          ['brandAssignment', 'Manufacturer Assigner'],
+          ['shelfLife', 'Shelf Life'],
+          ['manufacturers', 'Manufacturers'],
           ['salary', 'Salary & Rates'],
           ['payments', 'Payments'],
           ['history', 'Records & History']
@@ -920,6 +1235,17 @@ export default function AdminApp() {
                     })}
                     placeholder="e.g. Grocery"
                   />
+                </label>
+
+                <label>
+                  Brand (optional)
+                  <select
+                    value={productForm.brand_id || ''}
+                    onChange={e => setProductForm({ ...productForm, brand_id: e.target.value })}
+                  >
+                    <option value="">— No brand —</option>
+                    {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
                 </label>
 
                 <label>
@@ -1249,6 +1575,242 @@ export default function AdminApp() {
 
       {/* PARTNERS */}
 
+      {section === 'brandAssignment' && (
+        <section className="admin-card admin-spaced-section">
+          <h2 className="sec"><span>Manufacturer Assigner</span></h2>
+          <p className="hint">Workflow: select a manufacturer → choose one of its brands → search/select existing products → preview and confirm. Only <code>products.brand_id</code> is updated.</p>
+
+          <div className="grid" style={{ maxWidth: 900 }}>
+            <label className="full">
+              Manufacturer (primary)
+              <select value={maManufacturerId} onChange={e => { setMaManufacturerId(e.target.value); setMaBrandId(''); setMaSelectedIds(new Set()); setMaPreviewOpen(false); }}>
+                <option value="">— Select manufacturer —</option>
+                {manufacturers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            </label>
+            {maManufacturerId && (() => {
+              const m = manufacturers.find(x => String(x.id) === String(maManufacturerId));
+              return m ? (
+                <div className="full hint" style={{ marginTop: -8 }}>
+                  {m.registered_address && <div><b>Address:</b> {m.registered_address}</div>}
+                  {m.customer_care && <div><b>Customer care:</b> {m.customer_care}</div>}
+                  {m.website && <div><b>Website:</b> {m.website}</div>}
+                </div>
+              ) : null;
+            })()}
+            <label className="full">
+              Brand (optional). If none selected, a default brand will be created/used under this manufacturer.
+              <select value={maBrandId} onChange={e => { setMaBrandId(e.target.value); setMaSelectedIds(new Set()); setMaPreviewOpen(false); }} disabled={!maManufacturerId}>
+                <option value="">— Use/create default brand under manufacturer —</option>
+                {maBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </label>
+            {maManufacturerId && (
+              <div className="full" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <input type="text" placeholder="New brand name for this manufacturer" value={maNewBrandName} onChange={e => setMaNewBrandName(e.target.value)} style={{ flex: '1 1 220px', padding: 8 }} />
+                <button type="button" className="btn ghost small" onClick={createMaBrand} disabled={maCreatingBrand || !maNewBrandName.trim()}>{maCreatingBrand ? 'Creating…' : 'Create brand'}</button>
+              </div>
+            )}
+            {maManufacturerId && maBrands.length === 0 && <p className="hint full">No brands linked yet — you can create one above.</p>}
+          </div>
+
+          <div className="tools" style={{ flexWrap: 'wrap', marginTop: 16 }}>
+            <input type="search" placeholder="Search products by name…" value={maProductSearch} onChange={e => setMaProductSearch(e.target.value)} aria-label="Search products" />
+            <select value={maStatusFilter} onChange={e => setMaStatusFilter(e.target.value)}>
+              <option value="all">All products</option>
+              <option value="unassigned">Unassigned (no brand)</option>
+              <option value="assignedToSelected">Assigned to selected brand</option>
+              <option value="assignedOther">Assigned to other brand</option>
+            </select>
+          </div>
+
+          <div className="wrap" style={{ maxHeight: 420, overflow: 'auto' }}>
+            <table>
+              <thead><tr><th></th><th style={{ textAlign: 'left' }}>Product</th><th>Current brand</th></tr></thead>
+              <tbody>
+                {maProductsFiltered.length === 0 && <tr><td colSpan={3} className="empty">No products match filters.</td></tr>}
+                {maProductsFiltered.map(p => {
+                  const currentBrandName = brands.find(b => String(b.id) === String(p.brand_id))?.name || 'Unassigned';
+                  return (
+                    <tr key={p.id}>
+                      <td><input type="checkbox" checked={maSelectedIds.has(p.id)} onChange={e => {
+                        const next = new Set(maSelectedIds);
+                        if (e.target.checked) next.add(p.id); else next.delete(p.id);
+                        setMaSelectedIds(next);
+                      }} /></td>
+                      <td style={{ textAlign: 'left' }}>{p.name}</td>
+                      <td>{currentBrandName}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {maPreviewOpen && (
+            <div className="admin-card" style={{ marginTop: 16 }}>
+              <h3 style={{ marginTop: 0 }}>Preview (confirm before saving)</h3>
+              <p className="hint">Set brand for <b>{maSelectedIds.size}</b> product(s) to <b>{maBrandId ? (brands.find(b => String(b.id) === String(maBrandId))?.name || 'selected brand') : `a default brand under the selected manufacturer (created if needed)`}</b>. Only <code>brand_id</code> will change.</p>
+              <ul style={{ maxHeight: 200, overflow: 'auto' }}>
+                {Array.from(maSelectedIds).slice(0, 200).map(id => {
+                  const p = products.find(x => String(x.id) === String(id));
+                  return <li key={id}>{p?.name || id}</li>;
+                })}
+                {maSelectedIds.size > 200 && <li>…and {maSelectedIds.size - 200} more</li>}
+              </ul>
+              <div className="row">
+                <button className="btn ghost" type="button" onClick={() => setMaPreviewOpen(false)}>Cancel</button>
+                <button className="btn" type="button" disabled={maSaving} onClick={applyManufacturerAssignments}>{maSaving ? 'Saving…' : 'Confirm & assign'}</button>
+              </div>
+            </div>
+          )}
+
+          {!maPreviewOpen && (
+            <div className="row" style={{ marginTop: 12 }}>
+              <button className="btn" type="button" disabled={maSaving} onClick={openMaPreview}>Preview assignment ({maSelectedIds.size} selected)</button>
+            </div>
+          )}
+          <p className="hint" style={{ marginTop: 8 }}>No automatic name-based assignment. You manually select manufacturer → brand → products, then confirm.</p>
+        </section>
+      )}
+
+      {section === 'shelfLife' && (
+        <section className="admin-card admin-spaced-section">
+          <h2 className="sec"><span>Product Shelf-Life Calculator</span></h2>
+          <p className="hint">Select an existing product, enter batch details and dates. Click <b>Calculate</b> to compute (no save). Click <b>Save to database</b> to store the calculated batch (requires <code>product_shelf_batches</code> table).</p>
+          <form className="f" onSubmit={calcShelfLife} style={{ maxWidth: 720 }}>
+            {shelfError && <div className="notice bad">{shelfError}</div>}
+            <div className="grid">
+              <label className="full">
+                Product (existing) *
+                <select
+                  value={shelfForm.productId}
+                  onChange={e => { setShelfForm({ ...shelfForm, productId: e.target.value }); setShelfResult(null); }}
+                  required
+                >
+                  <option value="">-- Select product --</option>
+                  {products.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Batch number *
+                <input
+                  type="text"
+                  value={shelfForm.batchNo}
+                  onChange={e => { setShelfForm({ ...shelfForm, batchNo: e.target.value }); setShelfResult(null); }}
+                  placeholder="e.g. BATCH-001"
+                  required
+                />
+              </label>
+              <label>
+                Manufacturing date (MFD) *
+                <input
+                  type="date"
+                  value={shelfForm.mfd}
+                  onChange={e => { setShelfForm({ ...shelfForm, mfd: e.target.value }); setShelfResult(null); }}
+                  required
+                />
+              </label>
+              <label>
+                Expiry date (EXP) *
+                <input
+                  type="date"
+                  value={shelfForm.exp}
+                  onChange={e => { setShelfForm({ ...shelfForm, exp: e.target.value }); setShelfResult(null); }}
+                  required
+                />
+              </label>
+            </div>
+            <div className="row" style={{ marginTop: 12, flexWrap: 'wrap' }}>
+              <button className="btn" type="submit">Calculate</button>
+              <button className="btn" type="button" onClick={saveShelfBatch} disabled={shelfSaving || !shelfResult}>
+                {shelfSaving ? 'Saving...' : 'Save to database'}
+              </button>
+              <button
+                className="btn ghost"
+                type="button"
+                onClick={() => { setShelfForm({ productId: '', batchNo: '', mfd: '', exp: '' }); setShelfResult(null); setShelfError(''); }}
+              >
+                Reset
+              </button>
+            </div>
+          </form>
+
+          {shelfResult && (
+            <div className="admin-card" style={{ marginTop: 16, maxWidth: 720 }}>
+              <h3 style={{ marginTop: 0 }}>Calculated result</h3>
+              <div className="st">
+                <span>Product name</span><b>{shelfResult.productName}</b>
+                <span>Brand (prefix)</span><b>{shelfResult.brand || '(none)'}</b>
+                <span>Batch number</span><b>{shelfResult.batchNo}</b>
+                <span>MFD</span><b>{fmtDate(shelfResult.mfd)}</b>
+                <span>EXP</span><b>{fmtDate(shelfResult.exp)}</b>
+                <span>Total shelf life</span><b>{shelfResult.totalShelfLifeDays} days</b>
+                <span>Remaining shelf life (now)</span><b>{shelfResult.remainingShelfLifeDays} days</b>
+                <span>Current status</span>
+                <b className={shelfResult.status === 'Expired' ? 'neg' : shelfResult.status === 'Expiring Soon' ? '' : 'pos'}>
+                  {shelfResult.status}
+                </b>
+              </div>
+            </div>
+          )}
+
+          <div style={{ marginTop: 24 }}>
+            <h3>Saved batches</h3>
+            <div className="tools">
+              <input
+                type="search"
+                placeholder="Search by product name or batch number..."
+                value={shelfBatchSearch}
+                onChange={e => setShelfBatchSearch(e.target.value)}
+                aria-label="Search batches"
+              />
+              <button className="btn ghost small" type="button" onClick={loadShelfBatches} disabled={shelfBatchesLoading}>
+                {shelfBatchesLoading ? 'Refreshing...' : 'Refresh'}
+              </button>
+            </div>
+            <p className="hint">Showing batches {shelfForm.productId ? 'for selected product (plus search filter)' : 'matching search (all products)'}.</p>
+            <div className="wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Batch #</th>
+                    <th>MFD</th>
+                    <th>EXP</th>
+                    <th>Total (days)</th>
+                    <th>Remaining (days)</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shelfBatchesFiltered.length === 0 && (
+                    <tr><td colSpan={7} className="empty">No batches found. (Table may not exist yet until migration is applied.)</td></tr>
+                  )}
+                  {shelfBatchesFiltered.map(b => {
+                    const st = shelfBatchStatus(b.expiry_date);
+                    const pname = b.products?.name || (products.find(p => String(p.id) === String(b.product_id)) || {}).name || '(unknown)';
+                    return (
+                      <tr key={b.id}>
+                        <td style={{ textAlign: 'left' }}>{pname}</td>
+                        <td>{b.batch_number}</td>
+                        <td>{fmtDate(b.manufacturing_date)}</td>
+                        <td>{fmtDate(b.expiry_date)}</td>
+                        <td>{b.total_shelf_life_days}</td>
+                        <td>{st.rem}</td>
+                        <td className={st.label === 'Expired' ? 'neg' : st.label === 'Expiring Soon' ? '' : 'pos'}>{st.label}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      )}
+
       {section === 'partners' && (
         <section className="admin-card admin-spaced-section">
           <h2 className="sec"><span>Delivery Partners</span></h2>
@@ -1404,6 +1966,41 @@ export default function AdminApp() {
       )}
 
       {/* SALARY AND RATES */}
+
+      {section === 'manufacturers' && (
+        <section className="admin-card admin-spaced-section">
+          <h2 className="sec"><span>Manufacturers</span></h2>
+          <p className="hint">Manage manufacturer profiles (name, address, customer care, website). Use these when associating brands to manufacturers (per your DB schema/migrations).</p>
+          <form className="f" onSubmit={saveManufacturer} style={{ maxWidth: 720 }}>
+            <div className="grid">
+              <label className="full">Name *<input value={manufacturerForm.name} onChange={e => setManufacturerForm({ ...manufacturerForm, name: e.target.value })} required /></label>
+              <label className="full">Registered / business address<textarea value={manufacturerForm.registered_address} onChange={e => setManufacturerForm({ ...manufacturerForm, registered_address: e.target.value })} rows={2} style={{ width: '100%' }} /></label>
+              <label className="full">Customer care (phone/email)<input value={manufacturerForm.customer_care} onChange={e => setManufacturerForm({ ...manufacturerForm, customer_care: e.target.value })} /></label>
+              <label className="full">Website<input value={manufacturerForm.website} onChange={e => setManufacturerForm({ ...manufacturerForm, website: e.target.value })} placeholder="https://..." /></label>
+            </div>
+            <div className="row" style={{ marginTop: 12 }}>
+              <button className="btn" type="submit" disabled={manufacturerSaving}>{manufacturerSaving ? 'Saving...' : (manufacturerForm.id ? 'Update' : 'Add')} manufacturer</button>
+              {manufacturerForm.id && <button className="btn ghost" type="button" onClick={() => setManufacturerForm({ id: null, name: '', registered_address: '', customer_care: '', website: '' })}>Cancel</button>}
+            </div>
+          </form>
+          <div className="wrap" style={{ marginTop: 16 }}>
+            <table>
+              <thead><tr><th style={{ textAlign: 'left' }}>Name</th><th>Website</th><th>Updated</th><th></th></tr></thead>
+              <tbody>
+                {manufacturers.length === 0 && <tr><td colSpan={4} className="empty">No manufacturers found (or <code>manufacturers</code> table not created yet).</td></tr>}
+                {manufacturers.map(m => (
+                  <tr key={m.id}>
+                    <td style={{ textAlign: 'left' }}>{m.name}</td>
+                    <td>{m.website || '—'}</td>
+                    <td>{m.updated_at ? fmtDate(String(m.updated_at).slice(0,10)) : '—'}</td>
+                    <td><button className="btn small ghost" type="button" onClick={() => setManufacturerForm({ id: m.id, name: m.name || '', registered_address: m.registered_address || '', customer_care: m.customer_care || '', website: m.website || '' })}>Edit</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {section === 'salary' && (
         <section className="admin-card admin-spaced-section">

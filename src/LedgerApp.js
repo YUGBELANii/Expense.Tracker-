@@ -1,5 +1,5 @@
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { sb } from './lib/supabase';
 
@@ -50,6 +50,11 @@ export default function LedgerApp() {
   const [status, setStatus] = useState('');
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [productBrand, setProductBrand] = useState(null);
+  const [productManufacturer, setProductManufacturer] = useState(null);
+  const [productDetailLoading, setProductDetailLoading] = useState(false);
+  const [productDetailError, setProductDetailError] = useState('');
+  const productDialogRef = useRef(null);
 
   const [dMonth, setDMonth] = useState(today().slice(0, 7));
   const [dFilter, setDFilter] = useState('');
@@ -81,7 +86,29 @@ export default function LedgerApp() {
 
       const data = await ok(
         sb.from('products')
-          .select('id,name,category,unit,buy_price,sell_price,mrp,quantity,pack_size')
+          .select(`
+            id,
+            name,
+            category,
+            unit,
+            buy_price,
+            sell_price,
+            mrp,
+            quantity,
+            pack_size,
+            brand_id,
+            brands (
+              id,
+              name,
+              manufacturers (
+                id,
+                name,
+                registered_address,
+                customer_care,
+                website
+              )
+            )
+          `)
           .order('name')
       );
 
@@ -97,6 +124,34 @@ export default function LedgerApp() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!selectedProduct) {
+      setProductBrand(null);
+      setProductManufacturer(null);
+      setProductDetailError('');
+      setProductDetailLoading(false);
+      return;
+    }
+    setProductDetailLoading(false);
+    setProductDetailError('');
+    const b = selectedProduct.brands || null;
+    setProductBrand(b);
+    setProductManufacturer(b?.manufacturers || null);
+  }, [selectedProduct]);
+
+  useEffect(() => {
+    const dlg = productDialogRef.current;
+    if (!dlg) return;
+    if (selectedProduct) {
+      try { dlg.showModal(); } catch (_) { /* ignore */ }
+      document.body.style.overflow = 'hidden';
+    } else {
+      try { dlg.close(); } catch (_) { /* ignore */ }
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [selectedProduct]);
 
   const shown = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -587,75 +642,60 @@ export default function LedgerApp() {
 
       {/* Product details */}
       <dialog
-        open={!!selectedProduct}
+        ref={productDialogRef}
         onClose={() => setSelectedProduct(null)}
+        className="product-dialog"
       >
         {selectedProduct && (() => {
           const p = selectedProduct;
           const c = calc(p);
           const unit = p.unit || 'unit';
           const unitProfit = Number(p.sell_price || 0) - Number(p.buy_price || 0);
+          const brandName = productBrand?.name || null;
 
           return (
             <div className="f">
               <h2>{p.name}</h2>
-
               <p className="hint">
                 {p.category || 'Uncategorised'}
                 {p.pack_size ? ` · ${p.pack_size}` : ''}
               </p>
 
               <div className="preview">
-                <span>Purchase price / {unit}</span>
-                <b>{inr(p.buy_price)}</b>
-
-                <span>Selling price / {unit}</span>
-                <b>{inr(p.sell_price)}</b>
-
-                <span>Profit / {unit}</span>
-                <b className={unitProfit < 0 ? 'neg' : 'pos'}>
-                  {inr(unitProfit)}
-                </b>
-
-                <span>Remaining quantity</span>
-                <b>{Number(p.quantity) || 0} {unit}</b>
-
-                <span>Investment in remaining stock</span>
-                <b>{inr(c.invested)}</b>
-
-                <span>Potential selling value</span>
-                <b>{inr(c.sellValue)}</b>
-
-                <span>Total projected gross profit</span>
-                <b className={c.profit < 0 ? 'neg' : 'pos'}>
-                  {inr(c.profit)}
-                </b>
-
-                {c.hasMrp && (
-                  <>
-                    <span>MRP / {unit}</span>
-                    <b>{inr(p.mrp)}</b>
-
-                    <span>Total MRP value</span>
-                    <b>{inr(c.mrpValue)}</b>
-                  </>
-                )}
+                <span>Purchase price / {unit}</span><b>{inr(p.buy_price)}</b>
+                <span>Selling price / {unit}</span><b>{inr(p.sell_price)}</b>
+                <span>Profit / {unit}</span><b className={unitProfit < 0 ? 'neg' : 'pos'}>{inr(unitProfit)}</b>
+                <span>Remaining quantity</span><b>{Number(p.quantity) || 0} {unit}</b>
+                <span>Investment in remaining stock</span><b>{inr(c.invested)}</b>
+                <span>Potential selling value</span><b>{inr(c.sellValue)}</b>
+                <span>Total projected gross profit</span><b className={c.profit < 0 ? 'neg' : 'pos'}>{inr(c.profit)}</b>
+                {c.hasMrp && (<><span>MRP / {unit}</span><b>{inr(p.mrp)}</b><span>Total MRP value</span><b>{inr(c.mrpValue)}</b></>)}
               </div>
 
               <p className="hint">
-                Projected profit assumes all remaining stock sells at the
-                current selling price. It excludes overheads, discounts,
-                taxes and losses.
+                Projected profit assumes all remaining stock sells at the current selling price. It excludes overheads, discounts, taxes and losses.
               </p>
 
+              <h3 style={{ margin: '16px 0 8px', fontSize: '1.05rem' }}>Brand &amp; Manufacturer</h3>
+              {productDetailLoading && <p className="hint">Loading brand/manufacturer…</p>}
+              {productDetailError && <p className="err">{productDetailError}</p>}
+              {!productDetailLoading && !productDetailError && (
+                <div className="preview">
+                  <span>Brand</span>
+                  <b>{p.brand_id ? (brandName || 'Brand not assigned') : 'Brand not assigned'}</b>
+                  <span>Manufacturer name</span>
+                  <b>{productManufacturer?.name || 'Manufacturer information unavailable'}</b>
+                  <span>Registered address</span>
+                  <b>{productManufacturer?.registered_address || 'Manufacturer information unavailable'}</b>
+                  <span>Customer care</span>
+                  <b>{productManufacturer?.customer_care || 'Manufacturer information unavailable'}</b>
+                  <span>Website</span>
+                  <b>{productManufacturer?.website ? <a href={productManufacturer.website} target="_blank" rel="noreferrer">{productManufacturer.website}</a> : 'Manufacturer information unavailable'}</b>
+                </div>
+              )}
+
               <div className="row">
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => setSelectedProduct(null)}
-                >
-                  Close
-                </button>
+                <button type="button" className="btn" onClick={() => setSelectedProduct(null)}>Close</button>
               </div>
             </div>
           );
