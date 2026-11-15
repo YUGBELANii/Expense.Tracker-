@@ -17,6 +17,8 @@ The app expects these tables/columns (names inferred from current implementation
 - `delivery_settings(id=1, grocery_customer_charge, grocery_partner_earning, restaurant_customer_charge, restaurant_partner_earning, updated_at)`
 - `delivery_records(id, partner_id, delivery_type, status, delivery_date, customer_charge, partner_earning, note, created_at, ...)`
 - `delivery_payments(id, partner_id, amount, payment_date, note, created_at, ...)`
+- `suppliers`, `purchase_batches`, `product_shelf_batches` and two new `products` columns: see
+  `docs/SUPPLIERS_RESTOCK_SETUP.md` and `supabase/migrations/2026-11-16_suppliers_batches_restock.sql`
 
 **No destructive migrations required.** Partner "delete" in Admin is implemented as **soft delete/archive** (`active = false`) to preserve historical `delivery_records` and `delivery_payments`.
 

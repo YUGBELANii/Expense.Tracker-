@@ -2,6 +2,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { sb, isAdminUser } from './lib/supabase';
+import SuppliersSection from './admin/SuppliersSection';
+import PurchasesSection from './admin/PurchasesSection';
+import RestockSection from './admin/RestockSection';
 
 const TARGET_MIN = 8000;
 const TARGET_MAX = 10000;
@@ -208,6 +211,9 @@ export default function AdminApp() {
   const [shelfBatchesLoading, setShelfBatchesLoading] = useState(false);
   const [shelfBatchSearch, setShelfBatchSearch] = useState('');
 
+  // Suppliers (restock / purchases)
+  const [suppliers, setSuppliers] = useState([]);
+
   // Manufacturers
   const [manufacturers, setManufacturers] = useState([]);
   const [manufacturerForm, setManufacturerForm] = useState({ id: null, name: '', registered_address: '', customer_care: '', website: '' });
@@ -317,6 +323,13 @@ export default function AdminApp() {
         setBrands(brs || []);
       } catch (_e) {
         setBrands([]);
+      }
+      try {
+        const sups = await ok(sb.from('suppliers').select('*').order('name'));
+        setSuppliers(sups || []);
+      } catch (_e) {
+        // Table missing until the suppliers/batches SQL migration is run.
+        setSuppliers([]);
       }
     } catch (e) {
       setErr(
@@ -1113,6 +1126,9 @@ export default function AdminApp() {
         {[
           ['partners', 'Partners'],
           ['products', 'Products'],
+          ['suppliers', 'Suppliers'],
+          ['purchases', 'Purchases'],
+          ['restock', 'Restock'],
           ['brandAssignment', 'Manufacturer Assigner'],
           ['shelfLife', 'Shelf Life'],
           ['manufacturers', 'Manufacturers'],
@@ -2159,6 +2175,30 @@ export default function AdminApp() {
             })}
           </div>
         </section>
+      )}
+
+      {/* SUPPLIERS, PURCHASES AND RESTOCK */}
+
+      {section === 'suppliers' && (
+        <SuppliersSection suppliers={suppliers} onChanged={loadAll} />
+      )}
+
+      {section === 'purchases' && (
+        <PurchasesSection
+          products={products}
+          suppliers={suppliers}
+          onChanged={loadAll}
+        />
+      )}
+
+      {section === 'restock' && (
+        <RestockSection
+          products={products}
+          suppliers={suppliers}
+          brands={brands}
+          manufacturers={manufacturers}
+          onChanged={loadAll}
+        />
       )}
 
       {/* PAYMENTS */}
