@@ -1,6 +1,6 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useLocation, Link } from 'react-router-dom';
 import { sb } from './lib/supabase';
 
 const TYPE = { grocery: 'Grocery', restaurant: 'Restaurant' };
@@ -44,7 +44,8 @@ function calc(p) {
 }
 
 export default function LedgerApp() {
-  const [tab, setTab] = useState('stock');
+  const location = useLocation();
+  const tab = location.pathname === '/delivery' ? 'delivery' : 'stock';
   const [products, setProducts] = useState([]);
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
@@ -328,37 +329,15 @@ export default function LedgerApp() {
   const w = v => Math.max(v, 0) / barBase * 100;
 
   return (
-    <main>
+    <div>
       <header className="page-header">
         <div>
-          <h1>Stock ledger</h1>
+          <h1>{tab === 'stock' ? 'Stock Ledger' : 'Delivery'}</h1>
           <span className="mode">
-            {sb ? 'Connected to Supabase · Read-only products' : 'Supabase not connected'}
+            {sb ? 'Connected to Supabase' : 'Supabase not connected'}
           </span>
         </div>
-
-        <Link to="/admin" className="btn ghost small">
-          Admin Panel
-        </Link>
       </header>
-
-      <nav className="tabs" aria-label="Sections">
-        <button
-          className={`tab ${tab === 'stock' ? 'on' : ''}`}
-          onClick={() => setTab('stock')}
-          type="button"
-        >
-          Stock Ledger
-        </button>
-
-        <button
-          className={`tab ${tab === 'delivery' ? 'on' : ''}`}
-          onClick={() => setTab('delivery')}
-          type="button"
-        >
-          Delivery
-        </button>
-      </nav>
 
       {tab === 'stock' && (
         <div id="tab-stock" className="panel">
@@ -807,6 +786,6 @@ export default function LedgerApp() {
           </form>
         )}
       </dialog>
-    </main>
+    </div>
   );
 }

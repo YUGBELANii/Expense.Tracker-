@@ -1,6 +1,6 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import { sb, isAdminUser } from './lib/supabase';
 import SuppliersSection from './admin/SuppliersSection';
 import PurchasesSection from './admin/PurchasesSection';
@@ -137,10 +137,12 @@ function Login() {
 }
 
 export default function AdminApp() {
+  const { section: sectionParam } = useParams();
+  const navigate = useNavigate();
+  const section = sectionParam || 'partners';
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(false);
 
-  const [section, setSection] = useState('partners');
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
@@ -1106,8 +1108,6 @@ export default function AdminApp() {
         </div>
 
         <div className="row">
-          <Link to="/" className="btn ghost small">Back to Ledger</Link>
-
           <button
             className="btn ghost small"
             onClick={loadAll}
@@ -1121,31 +1121,6 @@ export default function AdminApp() {
           </button>
         </div>
       </header>
-
-      <nav className="admin-nav">
-        {[
-          ['partners', 'Partners'],
-          ['products', 'Products'],
-          ['suppliers', 'Suppliers'],
-          ['purchases', 'Purchases'],
-          ['restock', 'Restock'],
-          ['brandAssignment', 'Manufacturer Assigner'],
-          ['shelfLife', 'Shelf Life'],
-          ['manufacturers', 'Manufacturers'],
-          ['salary', 'Salary & Rates'],
-          ['payments', 'Payments'],
-          ['history', 'Records & History']
-        ].map(([k, l]) => (
-          <button
-            key={k}
-            className={`tab ${section === k ? 'on' : ''}`}
-            onClick={() => setSection(k)}
-            type="button"
-          >
-            {l}
-          </button>
-        ))}
-      </nav>
 
       {msg && <div className="notice ok">{msg}</div>}
       {err && <div className="notice bad">{err}</div>}
@@ -1948,7 +1923,7 @@ export default function AdminApp() {
                           className="btn ghost small"
                           onClick={() => {
                             setSelectedPartner(p.id);
-                            setSection('history');
+                            navigate('/admin/history');
                           }}
                         >
                           View records
