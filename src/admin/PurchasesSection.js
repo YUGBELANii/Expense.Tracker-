@@ -39,6 +39,16 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
   const [batchesLoading, setBatchesLoading] = useState(false);
   const [batchSupplierFilter, setBatchSupplierFilter] = useState('');
 
+  const requestIdRef = React.useRef(null);
+  function getRequestId() {
+    if (!requestIdRef.current) {
+      requestIdRef.current = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    }
+    return requestIdRef.current;
+  }
+
   const flash = text => {
     setMsg(text);
     setTimeout(() => setMsg(''), 3500);
@@ -87,7 +97,6 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
     setErr('');
     const qty = Number(form.quantity);
     if (!form.product_id) { setErr('Choose a product.'); return; }
-    if (!form.supplier_id) { setErr('Choose a supplier. Create one in the Suppliers tab first.'); return; }
     if (!(qty > 0)) { setErr('Quantity must be more than zero.'); return; }
     if (!form.purchase_date) { setErr('Choose the purchase date.'); return; }
     if (form.manufacturing_date && form.expiry_date && form.expiry_date < form.manufacturing_date) {
@@ -99,30 +108,28 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
     try {
       if (!sb) throw new Error('Supabase is not configured.');
 
-      await ok(
-        sb.from('purchase_batches').insert({
-          product_id: form.product_id,
-          supplier_id: form.supplier_id,
-          quantity: qty,
-          buy_price: form.buy_price === '' ? null : Number(form.buy_price),
-          purchase_date: form.purchase_date,
-          invoice_no: form.invoice_no.trim() || null,
-          batch_number: form.batch_number.trim() || null,
-          manufacturing_date: form.manufacturing_date || null,
-          expiry_date: form.expiry_date || null,
-          note: form.note.trim() || null
-        })
-      );
+      const requestId = getRequestId();
+      const rpcPayload = {
+        p_request_id: requestId,
+        p_product_id: form.product_id,
+        p_quantity: qty,
+        p_buy_price: form.buy_price === '' ? null : Number(form.buy_price),
+        p_supplier_id: form.supplier_id || null,
+        p_purchase_date: form.purchase_date,
+        p_invoice_no: form.invoice_no.trim() || null,
+        p_batch_number: form.batch_number.trim() || null,
+        p_manufacturing_date: form.manufacturing_date || null,
+        p_expiry_date: form.expiry_date || null,
+        p_note: form.note.trim() || null
+      };
 
-      // Follow-up product updates. Each is optional and explicit.
+      // Call atomic RPC (handles purchase batch + stock increment/idempotency per DB)
+      const { error: rpcError } = await sb.rpc('record_purchase', rpcPayload);
+      if (rpcError) throw rpcError;
+
+      // Optional follow-ups not handled by RPC in spec? Preserve existing UI toggles:
+      // update buy price and remember preferred supplier (these are not stock increments).
       const productUpdate = {};
-      if (addToStock) {
-        // Re-read the row so a stale screen does not overwrite newer stock.
-        const fresh = await ok(
-          sb.from('products').select('id, quantity').eq('id', form.product_id).single()
-        );
-        productUpdate.quantity = (Number(fresh.quantity) || 0) + qty;
-      }
       if (updateBuyPrice && form.buy_price !== '') {
         productUpdate.buy_price = Number(form.buy_price);
       }
@@ -135,14 +142,16 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
 
       flash(
         'Purchase saved.' +
-        (addToStock ? ` Stock increased by ${qty}.` : '') +
+        (addToStock ? ` (stock updated via server).` : '') +
         (rememberSupplier ? ' Supplier remembered for restock.' : '')
       );
+      requestIdRef.current = null; // success: clear idempotency key for next submission
       setForm(f => ({ ...emptyForm(), supplier_id: f.supplier_id, purchase_date: f.purchase_date }));
       setProductQuery('');
       await loadBatches();
       if (onChanged) await onChanged();
     } catch (er) {
+      // Do NOT clear requestIdRef on failure so a retry reuses the same request_id (idempotency)
       setErr('Could not save purchase: ' + (er.message || er));
     } finally {
       setSaving(false);
@@ -192,13 +201,12 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
             </select>
           </label>
           <label>
-            Supplier
+            Supplier (optional)
             <select
               value={form.supplier_id}
               onChange={e => setForm({ ...form, supplier_id: e.target.value })}
-              required
             >
-              <option value="">Select supplier</option>
+              <option value="">No supplier</option>
               {activeSuppliers.map(s => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}

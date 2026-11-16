@@ -8,6 +8,8 @@ import {
   stockState
 } from '../services/restock';
 
+const DEFAULT_LOW_STOCK_THRESHOLD = 3;
+
 const ok = async q => {
   const { data, error } = await q;
   if (error) throw error;
@@ -28,6 +30,10 @@ export default function RestockSection({ products, suppliers, brands, manufactur
   const [savingProductId, setSavingProductId] = useState(null);
   const [showThresholdEditor, setShowThresholdEditor] = useState(false);
   const [thresholdSearch, setThresholdSearch] = useState('');
+  const [restockSearch, setRestockSearch] = useState('');
+  const [restockCategory, setRestockCategory] = useState('');
+  const [restockSupplierFilter, setRestockSupplierFilter] = useState('');
+  const [restockSort, setRestockSort] = useState('stock_asc');
 
   const flash = text => {
     setMsg(text);
@@ -38,15 +44,29 @@ export default function RestockSection({ products, suppliers, brands, manufactur
     if (!sb) return;
     setLoadingBatches(true);
     try {
-      const rows = await ok(
-        sb.from('purchase_batches')
-          .select('product_id, supplier_id, quantity, buy_price, purchase_date')
-          .order('purchase_date', { ascending: false })
-          .order('created_at', { ascending: false })
-          .limit(3000)
-      );
+      const prods = products || [];
+      const lowOutIds = prods.filter(p => stockState(p, DEFAULT_LOW_STOCK_THRESHOLD) !== 'ok').map(p => p.id);
+      if (lowOutIds.length === 0) {
+        setLastBatchByProduct({});
+        setLoadingBatches(false);
+        return;
+      }
+      // Fetch batches for only low/out products (chunk if needed)
+      const chunks = [];
+      for (let i = 0; i < lowOutIds.length; i += 200) chunks.push(lowOutIds.slice(i, i + 200));
+      const allRows = [];
+      for (const chunk of chunks) {
+        const rows = await ok(
+          sb.from('purchase_batches')
+            .select('product_id, supplier_id, quantity, buy_price, purchase_date, batch_number, expiry_date')
+            .in('product_id', chunk)
+            .order('purchase_date', { ascending: false })
+            .order('created_at', { ascending: false })
+        );
+        allRows.push(...(rows || []));
+      }
       const byProduct = {};
-      (rows || []).forEach(r => {
+      allRows.forEach(r => {
         if (!byProduct[r.product_id]) byProduct[r.product_id] = r; // newest first
       });
       setLastBatchByProduct(byProduct);
@@ -55,20 +75,38 @@ export default function RestockSection({ products, suppliers, brands, manufactur
     } finally {
       setLoadingBatches(false);
     }
-  }, []);
+  }, [products]);
 
   useEffect(() => {
     loadLastBatches();
   }, [loadLastBatches]);
 
   const items = useMemo(
-    () => buildRestockItems({ products: products || [], brands: brands || [], manufacturers: manufacturers || [], lastBatchByProduct }),
+    () => buildRestockItems({ products: products || [], brands: brands || [], manufacturers: manufacturers || [], lastBatchByProduct, defaultThreshold: DEFAULT_LOW_STOCK_THRESHOLD }),
     [products, brands, manufacturers, lastBatchByProduct]
   );
 
+  const categories = useMemo(() => {
+    const set = new Set((products || []).map(p => p.category).filter(Boolean));
+    return [...set].sort();
+  }, [products]);
+
+  const filteredItems = useMemo(() => {
+    let list = items.slice();
+    const term = restockSearch.trim().toLowerCase();
+    if (term) list = list.filter(i => (i.name || '').toLowerCase().includes(term) || (i.category || '').toLowerCase().includes(term));
+    if (restockCategory) list = list.filter(i => (i.category || '') === restockCategory);
+    if (restockSupplierFilter === '__none__') list = list.filter(i => !i.supplierId);
+    else if (restockSupplierFilter) list = list.filter(i => String(i.supplierId) === String(restockSupplierFilter));
+    if (restockSort === 'stock_asc') list.sort((a,b) => a.quantity - b.quantity || a.name.localeCompare(b.name));
+    else if (restockSort === 'name_asc') list.sort((a,b) => a.name.localeCompare(b.name));
+    else if (restockSort === 'date_desc') list.sort((a,b) => (b.lastPurchaseDate || '').localeCompare(a.lastPurchaseDate || '') || a.name.localeCompare(b.name));
+    return list;
+  }, [items, restockSearch, restockCategory, restockSupplierFilter, restockSort]);
+
   const groups = useMemo(
-    () => groupBySupplier(items, (suppliers || []).filter(s => s.active)),
-    [items, suppliers]
+    () => groupBySupplier(filteredItems, (suppliers || []).filter(s => s.active)),
+    [filteredItems, suppliers]
   );
 
   const outCount = items.filter(i => i.state === 'out').length;
@@ -133,9 +171,7 @@ export default function RestockSection({ products, suppliers, brands, manufactur
     <section className="admin-card admin-spaced-section">
       <h2 className="sec"><span>Restock board</span></h2>
       <p className="hint">
-        Items that are out of stock or at/below their low-stock level, grouped by the supplier
-        to order from. Use the WhatsApp button for an instant order message, or copy the list.
-        A product's supplier comes from "Remember supplier" on the Purchases tab, or assign it below.
+        Items at or below their low-stock level (default {DEFAULT_LOW_STOCK_THRESHOLD} units, unless a custom level is set) or out of stock. Grouped by supplier for ordering. Use WhatsApp or copy the list.
       </p>
 
       {msg && <div className="notice ok">{msg}</div>}
@@ -156,13 +192,33 @@ export default function RestockSection({ products, suppliers, brands, manufactur
         </div>
       </section>
 
+      <div className="tools" style={{ flexWrap: 'wrap' }}>
+        <input type="search" placeholder="Search product or category…" value={restockSearch} onChange={e => setRestockSearch(e.target.value)} aria-label="Search restock items" />
+        <select value={restockCategory} onChange={e => setRestockCategory(e.target.value)} aria-label="Filter by category">
+          <option value="">All categories</option>
+          {categories.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select value={restockSupplierFilter} onChange={e => setRestockSupplierFilter(e.target.value)} aria-label="Filter by supplier">
+          <option value="">All suppliers</option>
+          <option value="__none__">No supplier assigned</option>
+          {(suppliers || []).filter(s=>s.active).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <select value={restockSort} onChange={e => setRestockSort(e.target.value)} aria-label="Sort">
+          <option value="stock_asc">Lowest stock first</option>
+          <option value="name_asc">Name A–Z</option>
+          <option value="date_desc">Latest purchase date</option>
+        </select>
+      </div>
+
       {loadingBatches && <div className="pad">Loading purchase history...</div>}
 
       {items.length === 0 && !loadingBatches && (
         <div className="pad">
-          Nothing needs restocking right now. Set low-stock levels below so items appear here
-          before they run out.
+          Nothing needs restocking right now (default threshold is {DEFAULT_LOW_STOCK_THRESHOLD} units). Set custom low-stock levels below if needed.
         </div>
+      )}
+      {items.length > 0 && filteredItems.length === 0 && !loadingBatches && (
+        <div className="pad">No items match your search/filter.</div>
       )}
 
       {groups.map(group => {
@@ -203,8 +259,10 @@ export default function RestockSection({ products, suppliers, brands, manufactur
                     <th>Brand</th>
                     <th>Manufacturer</th>
                     <th>Left</th>
+                    <th>Threshold</th>
                     <th>Order qty</th>
                     <th>Last rate</th>
+                    <th>Last bought</th>
                     <th>Status</th>
                     {!group.supplierId && <th>Assign supplier</th>}
                   </tr>
@@ -219,8 +277,10 @@ export default function RestockSection({ products, suppliers, brands, manufactur
                       <td>{item.brandName || '–'}</td>
                       <td>{item.manufacturerName || '–'}</td>
                       <td>{item.quantity} {item.unit}</td>
+                      <td>{item.threshold ?? DEFAULT_LOW_STOCK_THRESHOLD}</td>
                       <td>{item.suggestedQty ? `${item.suggestedQty} ${item.unit}` : 'ask supplier'}</td>
                       <td>{item.lastBuyPrice != null ? inr(item.lastBuyPrice) : '–'}</td>
+                      <td>{item.lastPurchaseDate || '–'}{item.lastBatchNumber ? ` (batch ${item.lastBatchNumber})` : ''}{item.lastExpiryDate ? ` exp ${item.lastExpiryDate}` : ''}</td>
                       <td>
                         <span className={`tag ${item.state === 'out' ? 'bad' : ''}`}>
                           {item.state === 'out' ? 'Out of stock' : 'Low stock'}
@@ -269,8 +329,7 @@ export default function RestockSection({ products, suppliers, brands, manufactur
         </button>
       </h3>
       <p className="hint">
-        A product joins the restock board when its stock is at or below this level.
-        Leave empty to alert only when fully out of stock.
+        A product joins the restock board when its stock is at or below this level (default is {DEFAULT_LOW_STOCK_THRESHOLD}). Leave empty to use the default.
       </p>
 
       {showThresholdEditor && (

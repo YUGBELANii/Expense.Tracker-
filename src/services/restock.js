@@ -13,21 +13,23 @@ export function normalizeWhatsAppPhone(raw) {
 }
 
 // 'out' = nothing left, 'low' = at/below the product's low-stock threshold.
-export function stockState(product) {
+export function stockState(product, defaultThreshold = 3) {
   const qty = Number(product?.quantity) || 0;
   if (qty <= 0) return 'out';
-  const thr = product?.low_stock_threshold;
-  if (thr !== null && thr !== undefined && thr !== '' && qty <= Number(thr)) return 'low';
+  const rawThr = product?.low_stock_threshold;
+  const thr = (rawThr !== null && rawThr !== undefined && rawThr !== '') ? Number(rawThr) : Number(defaultThreshold);
+  if (Number.isFinite(thr) && thr >= 0 && qty <= thr) return 'low';
   return 'ok';
 }
 
 // How much to ask the supplier for. Last purchase quantity wins; otherwise
-// refill to twice the threshold; otherwise let the supplier suggest.
-export function suggestedQuantity(product, lastBatch) {
+// refill to twice the effective threshold; otherwise let the supplier suggest.
+export function suggestedQuantity(product, lastBatch, defaultThreshold = 3) {
   const lastQty = Number(lastBatch?.quantity);
   if (lastQty > 0) return lastQty;
-  const thr = Number(product?.low_stock_threshold);
-  if (thr > 0) {
+  const rawThr = product?.low_stock_threshold;
+  const thr = (rawThr !== null && rawThr !== undefined && rawThr !== '') ? Number(rawThr) : Number(defaultThreshold);
+  if (Number.isFinite(thr) && thr > 0) {
     const qty = Number(product?.quantity) || 0;
     return Math.max(Math.ceil(thr * 2 - qty), 1);
   }
@@ -37,12 +39,12 @@ export function suggestedQuantity(product, lastBatch) {
 // Builds the flat list of items that need restocking, resolving
 // brand -> manufacturer and the supplier to order from
 // (preferred supplier on the product, else supplier of the last purchase).
-export function buildRestockItems({ products = [], brands = [], manufacturers = [], lastBatchByProduct = {} }) {
+export function buildRestockItems({ products = [], brands = [], manufacturers = [], lastBatchByProduct = {}, defaultThreshold = 3 }) {
   const brandById = Object.fromEntries(brands.map(b => [b.id, b]));
   const manufacturerById = Object.fromEntries(manufacturers.map(m => [m.id, m]));
 
   return products
-    .map(product => ({ product, state: stockState(product) }))
+    .map(product => ({ product, state: stockState(product, defaultThreshold) }))
     .filter(x => x.state !== 'ok')
     .map(({ product, state }) => {
       const brand = product.brand_id ? brandById[product.brand_id] : null;
@@ -50,6 +52,8 @@ export function buildRestockItems({ products = [], brands = [], manufacturers = 
         ? manufacturerById[brand.manufacturer_id]
         : null;
       const last = lastBatchByProduct[product.id] || null;
+      const rawThr = product.low_stock_threshold;
+      const effectiveThr = (rawThr !== null && rawThr !== undefined && rawThr !== '') ? Number(rawThr) : Number(defaultThreshold);
 
       return {
         productId: product.id,
@@ -59,13 +63,16 @@ export function buildRestockItems({ products = [], brands = [], manufacturers = 
         category: product.category || '',
         quantity: Number(product.quantity) || 0,
         threshold: product.low_stock_threshold ?? null,
+        effectiveThreshold: effectiveThr,
         state,
         brandName: brand ? brand.name : null,
         manufacturerName: manufacturer ? manufacturer.name : null,
         supplierId: product.preferred_supplier_id || (last ? last.supplier_id : null) || null,
         lastBuyPrice: last && last.buy_price != null ? Number(last.buy_price) : null,
         lastPurchaseDate: last ? last.purchase_date : null,
-        suggestedQty: suggestedQuantity(product, last)
+        lastBatchNumber: last ? last.batch_number : null,
+        lastExpiryDate: last ? last.expiry_date : null,
+        suggestedQty: suggestedQuantity(product, last, defaultThreshold)
       };
     })
     .sort((a, b) => {

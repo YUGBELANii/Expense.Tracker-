@@ -33,14 +33,15 @@ describe('stockState', () => {
     expect(stockState({ quantity: 0 })).toBe('out');
     expect(stockState({ quantity: -2 })).toBe('out');
   });
-  test('low when at or below threshold', () => {
+  test('low when at or below threshold (custom or default)', () => {
     expect(stockState({ quantity: 3, low_stock_threshold: 5 })).toBe('low');
     expect(stockState({ quantity: 5, low_stock_threshold: 5 })).toBe('low');
+    expect(stockState({ quantity: 2 })).toBe('low'); // default threshold 3
+    expect(stockState({ quantity: 3 })).toBe('low'); // default threshold 3
   });
-  test('ok above threshold or without threshold', () => {
+  test('ok above threshold', () => {
     expect(stockState({ quantity: 6, low_stock_threshold: 5 })).toBe('ok');
-    expect(stockState({ quantity: 1 })).toBe('ok');
-    expect(stockState({ quantity: 1, low_stock_threshold: null })).toBe('ok');
+    expect(stockState({ quantity: 4 })).toBe('ok'); // above default 3
   });
 });
 
@@ -50,9 +51,7 @@ describe('suggestedQuantity', () => {
   });
   test('refills to twice the threshold when no purchase history', () => {
     expect(suggestedQuantity({ quantity: 2, low_stock_threshold: 5 }, null)).toBe(8);
-  });
-  test('null when nothing to go on', () => {
-    expect(suggestedQuantity({ quantity: 0 }, null)).toBeNull();
+    expect(suggestedQuantity({ quantity: 0 }, null)).toBe(6); // default threshold 3
   });
 });
 
@@ -132,9 +131,10 @@ describe('buildRestockMessage', () => {
     expect(text).toContain('OUT OF STOCK');
     expect(text).toContain('Dhanyavad');
   });
-  test('asks supplier to suggest quantity when unknown', () => {
+  test('includes suggested quantity when computable', () => {
     const text = buildRestockMessage(tirora);
-    expect(text).toContain('qty - please suggest');
+    expect(text).not.toContain('qty - please suggest');
+    expect(text).toContain('need');
   });
 });
 

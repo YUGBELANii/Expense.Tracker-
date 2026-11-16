@@ -60,7 +60,8 @@ const emptyProduct = () => ({
   invoice: '',
   purchase_date: today(),
   notes: '',
-  brand_id: ''
+  brand_id: '',
+  preferred_supplier_id: ''
 });
 
 function Login() {
@@ -382,7 +383,8 @@ export default function AdminApp() {
         invoice: product.invoice || '',
         purchase_date: product.purchase_date || '',
         notes: product.notes || '',
-        brand_id: product.brand_id || ''
+        brand_id: product.brand_id || '',
+        preferred_supplier_id: product.preferred_supplier_id || ''
       });
     } else {
       setProductForm(emptyProduct());
@@ -467,7 +469,8 @@ export default function AdminApp() {
       invoice: f.invoice.trim() || null,
       purchase_date: f.purchase_date || null,
       notes: f.notes.trim() || null,
-      brand_id: f.brand_id || null
+      brand_id: f.brand_id || null,
+      preferred_supplier_id: f.preferred_supplier_id || null
     };
 
     setProductSaving(true);
@@ -1236,6 +1239,17 @@ export default function AdminApp() {
                   >
                     <option value="">— No brand —</option>
                     {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                </label>
+
+                <label>
+                  Preferred supplier (optional)
+                  <select
+                    value={productForm.preferred_supplier_id || ''}
+                    onChange={e => setProductForm({ ...productForm, preferred_supplier_id: e.target.value })}
+                  >
+                    <option value="">— None —</option>
+                    {(suppliers || []).filter(s => s.active).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 </label>
 
@@ -2155,7 +2169,7 @@ export default function AdminApp() {
       {/* SUPPLIERS, PURCHASES AND RESTOCK */}
 
       {section === 'suppliers' && (
-        <SuppliersSection suppliers={suppliers} onChanged={loadAll} />
+        <SuppliersSection suppliers={suppliers} products={products} onChanged={loadAll} />
       )}
 
       {section === 'purchases' && (
