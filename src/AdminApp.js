@@ -2087,12 +2087,51 @@ export default function AdminApp() {
           </form>
 
           <h3 className="sec" style={{ marginTop: 24 }}>
-            <span>Monthly salary summary ({month})</span>
+            <span>Monthly salary progress tracker ({month})</span>
             <input
               type="month"
               value={month}
               onChange={e => setMonth(e.target.value)}
             />
+          </h3>
+          <p className="hint">Target ₹8,000/month. Earnings use saved <code>partner_earning</code> from completed deliveries (historical rates preserved). Estimates use ₹25/grocery and ₹40/food (alternatives).</p>
+          <div className="pcards">
+            {partners.map(p => {
+              const pr = done.filter(r => r.partner_id === p.id);
+              const groceryCount = pr.filter(r => r.delivery_type === 'grocery').length;
+              const foodCount = pr.filter(r => r.delivery_type === 'restaurant').length;
+              const earn = sum(pr, r => r.partner_earning);
+              const target = 8000;
+              const remaining = Math.max(target - earn, 0);
+              const pct = target > 0 ? Math.min(100, (earn / target) * 100) : 0;
+              const addGrocery = remaining > 0 ? Math.ceil(remaining / 25) : 0;
+              const addFood = remaining > 0 ? Math.ceil(remaining / 40) : 0;
+              return (
+                <div className="pcard" key={p.id}>
+                  <div className="ph">
+                    <b>{p.name}</b>
+                    <span className={`tag ${p.active ? 'ok' : ''}`}>{p.active ? 'Active' : 'Archived'}</span>
+                  </div>
+                  <div className="st">
+                    <span>Target (monthly)</span><b>{inr(target)}</b>
+                    <span>Completed (Grocery / Food)</span><b>{groceryCount} / {foodCount} ({pr.length} total)</b>
+                    <span>Earnings (completed)</span><b>{inr(earn)}</b>
+                    <span>Remaining to target</span><b>{inr(remaining)}</b>
+                    <span>Progress</span><b>{pct.toFixed(1)}%</b>
+                  </div>
+                  <div className="pb" style={{ marginTop: 8 }}><i style={{ width: `${pct}%` }} /></div>
+                  <div className="st" style={{ marginTop: 10 }}>
+                    <span>Est. more grocery (@₹25)</span><b>{remaining > 0 ? `${addGrocery} deliveries` : 'Target reached'}</b>
+                    <span>Est. more food (@₹40)</span><b>{remaining > 0 ? `${addFood} deliveries` : 'Target reached'}</b>
+                  </div>
+                  {!p.active && pr.length === 0 && <p className="hint">Archived with no deliveries this month.</p>}
+                </div>
+              );
+            })}
+          </div>
+
+          <h3 className="sec" style={{ marginTop: 24 }}>
+            <span>Monthly salary summary ({month})</span>
           </h3>
 
           <div className="pcards">
