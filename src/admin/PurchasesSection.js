@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { sb } from '../lib/supabase';
+import InvoiceReconciliation from './InvoiceReconciliation';
 
 const ok = async q => {
   const { data, error } = await q;
@@ -339,6 +340,8 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
           </button>
         </div>
       </form>
+
+      <InvoiceReconciliation products={products || []} />
 
       <h3 className="sec"><span>Supplier price comparison</span></h3>
       <p className="hint">
