@@ -222,8 +222,6 @@ export default function RestockSection({ products, suppliers, brands, manufactur
     return list.slice(0, 60);
   }, [products, thresholdSearch]);
 
-  const activeSuppliers = (suppliers || []).filter(s => s.active);
-
   return (
     <section className="admin-card admin-spaced-section">
       <h2 className="sec"><span>Restock board</span></h2>
@@ -375,7 +373,8 @@ export default function RestockSection({ products, suppliers, brands, manufactur
                             onChange={e => setSupplierDrafts(current => ({ ...current, [item.productId]: e.target.value }))}
                             aria-label={`Supplier for ${item.name}`}
                           >
-                            <option value="__auto__">Auto: lowest recorded rate</option>
+                            <option value="">Choose supplier...</option>
+                            <option value="__auto__">Auto: lowest recorded rate / last supplier</option>
                             {item.supplierOptions.map(option => (
                               <option key={option.supplierId} value={option.supplierId}>
                                 {option.supplierName}
