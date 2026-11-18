@@ -191,7 +191,7 @@ export default function InvoiceReconciliation({ products = [] }) {
           {summary.unmatched > 0 && <div className="notice bad">{summary.unmatched} line(s) are unmatched. Match them below before relying on totals.</div>}
           <div className="wrap dt">
             <table>
-              <thead><tr><th>Invoice item</th><th>Database product match</th><th>Qty</th><th>Invoice rate</th><th>DB buy rate</th><th>Difference / unit</th><th>Potential margin</th></tr></thead>
+              <thead><tr><th>Invoice item</th><th>Database product match</th><th>Qty</th><th>Invoice rate</th><th>DB buy rate</th><th>DB sell rate</th><th>Difference / unit</th><th>Total cost variance</th><th>Potential margin</th></tr></thead>
               <tbody>
                 {enriched.map(row => (
                   <tr key={row.rowId}>
