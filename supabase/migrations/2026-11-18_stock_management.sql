@@ -96,12 +96,37 @@ drop policy if exists stock_balances_authenticated_read on public.stock_balances
 create policy stock_balances_authenticated_read
   on public.stock_balances for select to authenticated using (true);
 
+drop policy if exists stock_balances_admin_insert on public.stock_balances;
+create policy stock_balances_admin_insert
+  on public.stock_balances for insert to authenticated
+  with check (public.is_admin());
+
+drop policy if exists stock_balances_admin_update on public.stock_balances;
+create policy stock_balances_admin_update
+  on public.stock_balances for update to authenticated
+  using (public.is_admin())
+  with check (public.is_admin());
+
 drop policy if exists stock_movements_authenticated_read on public.stock_movements;
 create policy stock_movements_authenticated_read
   on public.stock_movements for select to authenticated using (true);
 
+drop policy if exists stock_movements_admin_insert on public.stock_movements;
+create policy stock_movements_admin_insert
+  on public.stock_movements for insert to authenticated
+  with check (public.is_admin());
+
+-- Keep the stock RPC invoker-scoped; RLS remains active for every write.
 grant select, insert on public.stock_locations to authenticated;
-grant select on public.stock_balances, public.stock_movements to authenticated;
+grant select, insert, update on public.stock_balances to authenticated;
+grant select, insert on public.stock_movements to authenticated;
+
+-- Align product quantity updates with the same trusted app_metadata admin helper.
+drop policy if exists "Admins can update products" on public.products;
+create policy "Admins can update products"
+  on public.products for update to authenticated
+  using (public.is_admin())
+  with check (public.is_admin());
 
 -- All stock writes go through this admin-only, atomic RPC. A single request may
 -- reconcile many products, but each product may occur only once in that request.
@@ -118,7 +143,7 @@ returns table(
   total_product_quantity numeric
 )
 language plpgsql
-security definer
+security invoker
 set search_path = ''
 as $function$
 declare
@@ -165,6 +190,7 @@ begin
       as x(product_id uuid, location_id uuid, mode text, quantity numeric)
   loop
     if v_item.product_id is null or v_item.location_id is null
+       or v_item.mode is null
        or v_item.mode not in ('add', 'set', 'reconcile')
        or v_item.quantity is null
        or v_item.quantity::text in ('NaN', 'Infinity', '-Infinity')
