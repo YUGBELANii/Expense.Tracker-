@@ -6,6 +6,7 @@ import SuppliersSection from './admin/SuppliersSection';
 import PurchasesSection from './admin/PurchasesSection';
 import RestockSection from './admin/RestockSection';
 import StockSection from './admin/StockSection';
+import PriceComparisonSection from './admin/PriceComparisonSection';
 
 const TARGET_MIN = 8000;
 const TARGET_MAX = 10000;
@@ -2170,6 +2171,10 @@ export default function AdminApp() {
 
       {section === 'suppliers' && (
         <SuppliersSection suppliers={suppliers} products={products} onChanged={loadAll} />
+      )}
+
+      {section === 'price-comparison' && (
+        <PriceComparisonSection products={products} />
       )}
 
       {section === 'purchases' && (

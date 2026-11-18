@@ -28,6 +28,7 @@ export default function AppLayout({ children }) {
     { to: '/admin/stock', label: 'Stock Management', icon: '📦' },
     { to: '/admin/suppliers', label: 'Suppliers', icon: '🏭' },
     { to: '/admin/purchases', label: 'Purchases', icon: '🧾' },
+    { to: '/admin/price-comparison', label: 'Price Comparison', icon: '⚖️' },
     { to: '/admin/restock', label: 'Restock', icon: '🔔' },
     { to: '/admin/brandAssignment', label: 'Manufacturer Assigner', icon: '🏷️' },
     { to: '/admin/shelfLife', label: 'Shelf Life', icon: '⏳' },
