@@ -14,7 +14,6 @@ const makeRequestId = () => (
 );
 
 const number = value => Number(value || 0);
-const inr = value => '₹' + number(value).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 
 export default function StockSection({ products = [], onChanged }) {
   const [locations, setLocations] = useState([]);

@@ -423,8 +423,7 @@ export default function AdminApp() {
       !Number.isFinite(buy) ||
       !Number.isFinite(sell) ||
       buy < 0 ||
-      sell < 0 ||
-      false
+      sell < 0
     ) {
       setErr('Enter valid non-negative prices.');
       return;
