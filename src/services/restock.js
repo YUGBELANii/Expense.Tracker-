@@ -96,7 +96,7 @@ export function buildSupplierOptionsByProduct(purchaseRows = [], suppliers = [])
 
 // Builds the flat list of items that need restocking, resolving
 // brand -> manufacturer and the supplier to order from
-// (preferred supplier on the product, else supplier of the last purchase).
+// (saved preference, else lowest latest recorded rate, else last purchase supplier).
 export function buildRestockItems({ products = [], brands = [], manufacturers = [], lastBatchByProduct = {}, supplierOptionsByProduct = {}, suppliers = [], defaultThreshold = 3 }) {
   const brandById = Object.fromEntries(brands.map(b => [b.id, b]));
   const manufacturerById = Object.fromEntries(manufacturers.map(m => [m.id, m]));
