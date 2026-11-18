@@ -1,21 +1,21 @@
 import React, { useMemo, useState } from 'react';
 
 const money = value => '₹' + Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
-const norm = value => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\\s+/g, ' ');
+const norm = value => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
 
 function parseCsv(text) {
   const rows = [];
   let row = [], cell = '', quoted = false;
-  const source = String(text || '').replace(/^\\uFEFF/, '');
-  const firstLine = source.split(/\\r?\\n/, 1)[0] || '';
-  const delimiter = firstLine.includes('\\t') ? '\\t' : firstLine.includes('|') ? '|' : ',';
+  const source = String(text || '').replace(/^\uFEFF/, '');
+  const firstLine = source.split(/\r?\n/, 1)[0] || '';
+  const delimiter = firstLine.includes('\t') ? '\t' : firstLine.includes('|') ? '|' : ',';
   for (let i = 0; i < source.length; i += 1) {
     const ch = source[i];
     if (ch === '"' && quoted && source[i + 1] === '"') { cell += '"'; i += 1; }
     else if (ch === '"') quoted = !quoted;
     else if (ch === delimiter && !quoted) { row.push(cell.trim()); cell = ''; }
-    else if ((ch === '\\n' || ch === '\\r') && !quoted) {
-      if (ch === '\\r' && source[i + 1] === '\\n') i += 1;
+    else if ((ch === '\n' || ch === '\r') && !quoted) {
+      if (ch === '\r' && source[i + 1] === '\n') i += 1;
       row.push(cell.trim()); cell = '';
       if (row.some(value => value !== '')) rows.push(row);
       row = [];
@@ -83,7 +83,7 @@ function toCsv(rows, products) {
       Number.isFinite(sell) && Number.isFinite(row.invoiceRate) && Number.isFinite(row.quantity) ? (sell - row.invoiceRate) * row.quantity : ''
     ].map(quote).join(',');
   });
-  return [header.map(quote).join(','), ...lines].join('\\n');
+  return [header.map(quote).join(','), ...lines].join('\n');
 }
 
 export default function InvoiceReconciliation({ products = [] }) {
@@ -203,7 +203,7 @@ export default function InvoiceReconciliation({ products = [] }) {
         </label>
         <label className="full">
           Or paste invoice rows (CSV / tab / pipe-separated text with a header)
-          <textarea rows={5} value={manualText} onChange={e => setManualText(e.target.value)} placeholder={'Item | Unit | Quantity | Unit Price | Barcode\\nDairy Milk | pcs | 10 | 20 |\\nFace Wash | | | 95 |'} />
+          <textarea rows={5} value={manualText} onChange={e => setManualText(e.target.value)} placeholder={'Item | Unit | Quantity | Unit Price | Barcode\nDairy Milk | pcs | 10 | 20 |\nFace Wash | | | 95 |'} />
         </label>
       </div>
       <div className="row" style={{ gap: 10, marginTop: 10 }}>
