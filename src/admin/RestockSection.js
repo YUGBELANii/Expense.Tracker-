@@ -379,7 +379,7 @@ export default function RestockSection({ products, suppliers, brands, manufactur
                               <option key={option.supplierId} value={option.supplierId}>
                                 {option.supplierName}
                                 {option.latestBuyPrice !== null
-                                  ? ` — ${inr(option.latestBuyPrice)}${option.isCheapest ? ' · Lowest rate' : ''}`
+                                  ? ` — ${inr(option.latestBuyPrice)}${option.lastPurchaseDate ? ` · ${option.lastPurchaseDate}` : ''}${option.isCheapest ? ' · Lowest rate' : ''}`
                                   : ' — no recorded rate'}
                               </option>
                             ))}
