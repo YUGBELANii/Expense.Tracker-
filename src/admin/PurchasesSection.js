@@ -34,6 +34,7 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
   const [batches, setBatches] = useState([]);
   const [batchesLoading, setBatchesLoading] = useState(false);
   const [batchSupplierFilter, setBatchSupplierFilter] = useState('');
+  const [comparisonQuery, setComparisonQuery] = useState('');
 
   const requestIdRef = React.useRef(null);
   function getRequestId(payload) {
@@ -58,17 +59,26 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
     if (!sb) return;
     setBatchesLoading(true);
     try {
-      const data = await ok(
-        sb.from('purchase_batches')
-          .select('*, products(name, unit), suppliers(name)')
-          .order('purchase_date', { ascending: false })
-          .order('created_at', { ascending: false })
-          .limit(300)
-      );
-      setBatches(data || []);
+      // Read the complete purchase history in stable pages. A fixed 300-row
+      // window can silently omit the latest supplier rate for older products.
+      const allRows = [];
+      const pageSize = 1000;
+      for (let offset = 0; ; offset += pageSize) {
+        const page = await ok(
+          sb.from('purchase_batches')
+            .select('id, product_id, supplier_id, quantity, buy_price, purchase_date, created_at, invoice_no, batch_number, products(name, unit, pack_size), suppliers(name)')
+            .order('purchase_date', { ascending: false })
+            .order('created_at', { ascending: false })
+            .order('id', { ascending: false })
+            .range(offset, offset + pageSize - 1)
+        );
+        allRows.push(...(page || []));
+        if (!page || page.length < pageSize) break;
+      }
+      setBatches(allRows);
     } catch (e) {
       setBatches([]);
-      setErr('Could not load purchases. Run the suppliers/batches SQL migration first. (' + (e.message || e) + ')');
+      setErr('Could not load purchase history. (' + (e.message || e) + ')');
     } finally {
       setBatchesLoading(false);
     }
@@ -155,41 +165,64 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
     ? batches.filter(b => b.supplier_id === batchSupplierFilter)
     : batches;
 
-  // Compare the latest recorded rate for each product/supplier pair.
-  // This is historical invoice data, not a live supplier quotation.
+  // Compare each supplier's most recent recorded rate for the same product.
+  // Product identity also fixes its unit/pack size; we deliberately do not guess
+  // equivalence between different product records or package descriptions.
   const supplierPriceRows = useMemo(() => {
     const latestByPair = new Map();
     batches.forEach(batch => {
-      if (batch.buy_price === null || batch.buy_price === undefined) return;
-      const key = `${batch.product_id}:${batch.supplier_id || 'none'}`;
+      if (!batch.supplier_id || batch.buy_price === null || batch.buy_price === undefined) return;
+      const price = Number(batch.buy_price);
+      if (!Number.isFinite(price) || price < 0) return;
+      const key = `${batch.product_id}:${batch.supplier_id}`;
       if (!latestByPair.has(key)) {
         latestByPair.set(key, {
           productId: batch.product_id,
           productName: batch.products?.name || 'Unknown product',
+          unit: batch.products?.unit || 'unit',
+          packSize: batch.products?.pack_size || '',
           supplierId: batch.supplier_id,
-          supplierName: batch.suppliers?.name || 'No supplier',
-          price: Number(batch.buy_price),
-          purchaseDate: batch.purchase_date,
-          batchNumber: batch.batch_number
+          supplierName: batch.suppliers?.name || 'Unknown supplier',
+          price,
+          purchaseDate: batch.purchase_date
         });
       }
     });
-    const rows = [...latestByPair.values()];
-    const lowestByProduct = {};
-    rows.forEach(row => {
-      lowestByProduct[row.productId] = Math.min(
-        lowestByProduct[row.productId] ?? Infinity,
-        row.price
-      );
+
+    const byProduct = new Map();
+    [...latestByPair.values()].forEach(row => {
+      if (!byProduct.has(row.productId)) byProduct.set(row.productId, []);
+      byProduct.get(row.productId).push(row);
     });
-    return rows
-      .map(row => ({
-        ...row,
-        lowest: row.price === lowestByProduct[row.productId],
-        difference: row.price - lowestByProduct[row.productId]
-      }))
+
+    return [...byProduct.values()]
+      .map(rows => {
+        const lowest = Math.min(...rows.map(row => row.price));
+        const supplierCount = rows.length;
+        return rows.map(row => ({
+          ...row,
+          supplierCount,
+          comparable: supplierCount > 1,
+          lowest: row.price === lowest,
+          difference: row.price - lowest,
+          differencePercent: lowest > 0 ? ((row.price - lowest) / lowest) * 100 : null
+        }));
+      })
+      .flat()
       .sort((a, b) => a.productName.localeCompare(b.productName) || a.price - b.price);
   }, [batches]);
+
+  const visiblePriceRows = useMemo(() => {
+    const term = comparisonQuery.trim().toLowerCase();
+    return supplierPriceRows.filter(row =>
+      !term || `${row.productName} ${row.packSize} ${row.supplierName}`.toLowerCase().includes(term)
+    );
+  }, [supplierPriceRows, comparisonQuery]);
+
+  const comparableProductCount = useMemo(
+    () => new Set(supplierPriceRows.filter(row => row.comparable).map(row => row.productId)).size,
+    [supplierPriceRows]
+  );
 
   return (
     <section className="admin-card admin-spaced-section">
@@ -309,26 +342,47 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
 
       <h3 className="sec"><span>Supplier price comparison</span></h3>
       <p className="hint">
-        Latest recorded purchase rate per supplier and product, based on the most recent 300 purchase records. Lowest recorded rate is highlighted; confirm current availability and quote before ordering.
+        Compares the latest recorded invoice rate from each supplier for the same product, using the full purchase history. Rates are per product unit; package size and unit are shown to prevent misleading comparisons. This is historical data, not a live quote.
       </p>
+      <div className="row" style={{ alignItems: 'center', gap: 12, marginBottom: 10 }}>
+        <strong>{comparableProductCount} products with multiple supplier rates</strong>
+        <input
+          value={comparisonQuery}
+          onChange={e => setComparisonQuery(e.target.value)}
+          placeholder="Search product or supplier"
+          aria-label="Search price comparisons"
+          style={{ maxWidth: 320 }}
+        />
+      </div>
       <div className="wrap dt">
         <table>
           <thead>
-            <tr><th>Product</th><th>Supplier</th><th>Latest rate</th><th>Purchase date</th><th>Above lowest</th><th>Status</th></tr>
+            <tr><th>Product / pack</th><th>Supplier</th><th>Latest rate</th><th>Purchase date</th><th>Difference vs lowest</th><th>Comparison</th></tr>
           </thead>
           <tbody>
-            {supplierPriceRows.map(row => (
-              <tr key={row.productId + ':' + (row.supplierId || 'none')}>
-                <td>{row.productName}</td>
+            {visiblePriceRows.map(row => (
+              <tr key={row.productId + ':' + row.supplierId}>
+                <td>{row.productName}{row.packSize ? <><br /><small>{row.packSize} · {row.unit}</small></> : <><br /><small>{row.unit}</small></>}</td>
                 <td>{row.supplierName}</td>
-                <td>{inr(row.price)}</td>
+                <td>{inr(row.price)} / {row.unit}</td>
                 <td>{row.purchaseDate}</td>
-                <td>{row.difference > 0 ? '+' + inr(row.difference) : '—'}</td>
-                <td>{row.lowest ? <span className="tag ok">Lowest recorded</span> : 'Higher'}</td>
+                <td>
+                  {row.lowest ? '—' : `+${inr(row.difference)} / ${row.unit}`}
+                  {!row.lowest && row.differencePercent !== null ? <small> ({row.differencePercent.toFixed(1)}%)</small> : null}
+                </td>
+                <td>
+                  {!row.comparable
+                    ? 'Only one supplier recorded'
+                    : row.lowest
+                      ? <span className="tag ok">Lowest recorded</span>
+                      : 'Higher recorded rate'}
+                </td>
               </tr>
             ))}
-            {supplierPriceRows.length === 0 && (
-              <tr><td colSpan={6} className="empty">No supplier price history yet. Record purchases with a supplier and buy price to compare rates.</td></tr>
+            {visiblePriceRows.length === 0 && (
+              <tr><td colSpan={6} className="empty">
+                {batchesLoading ? 'Loading complete purchase history...' : 'No comparable supplier rates yet. Record purchases with a supplier and buy price; a product becomes comparable after at least two suppliers have purchase history.'}
+              </td></tr>
             )}
           </tbody>
         </table>
