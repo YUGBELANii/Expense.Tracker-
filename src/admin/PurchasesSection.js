@@ -152,6 +152,42 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
     ? batches.filter(b => b.supplier_id === batchSupplierFilter)
     : batches;
 
+  // Compare the latest recorded rate for each product/supplier pair.
+  // This is historical invoice data, not a live supplier quotation.
+  const supplierPriceRows = useMemo(() => {
+    const latestByPair = new Map();
+    batches.forEach(batch => {
+      if (batch.buy_price === null || batch.buy_price === undefined) return;
+      const key = `${batch.product_id}:${batch.supplier_id || 'none'}`;
+      if (!latestByPair.has(key)) {
+        latestByPair.set(key, {
+          productId: batch.product_id,
+          productName: batch.products?.name || 'Unknown product',
+          supplierId: batch.supplier_id,
+          supplierName: batch.suppliers?.name || 'No supplier',
+          price: Number(batch.buy_price),
+          purchaseDate: batch.purchase_date,
+          batchNumber: batch.batch_number
+        });
+      }
+    });
+    const rows = [...latestByPair.values()];
+    const lowestByProduct = {};
+    rows.forEach(row => {
+      lowestByProduct[row.productId] = Math.min(
+        lowestByProduct[row.productId] ?? Infinity,
+        row.price
+      );
+    });
+    return rows
+      .map(row => ({
+        ...row,
+        lowest: row.price === lowestByProduct[row.productId],
+        difference: row.price - lowestByProduct[row.productId]
+      }))
+      .sort((a, b) => a.productName.localeCompare(b.productName) || a.price - b.price);
+  }, [batches]);
+
   return (
     <section className="admin-card admin-spaced-section">
       <h2 className="sec"><span>Purchase records</span></h2>
@@ -267,6 +303,33 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
           </button>
         </div>
       </form>
+
+      <h3 className="sec"><span>Supplier price comparison</span></h3>
+      <p className="hint">
+        Latest recorded purchase rate per supplier and product, based on the most recent 300 purchase records. Lowest recorded rate is highlighted; confirm current availability and quote before ordering.
+      </p>
+      <div className="wrap dt">
+        <table>
+          <thead>
+            <tr><th>Product</th><th>Supplier</th><th>Latest rate</th><th>Purchase date</th><th>Above lowest</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            {supplierPriceRows.map(row => (
+              <tr key={row.productId + ':' + (row.supplierId || 'none')}>
+                <td>{row.productName}</td>
+                <td>{row.supplierName}</td>
+                <td>{inr(row.price)}</td>
+                <td>{row.purchaseDate}</td>
+                <td>{row.difference > 0 ? '+' + inr(row.difference) : '—'}</td>
+                <td>{row.lowest ? <span className="tag ok">Lowest recorded</span> : 'Higher'}</td>
+              </tr>
+            ))}
+            {supplierPriceRows.length === 0 && (
+              <tr><td colSpan={6} className="empty">No supplier price history yet. Record purchases with a supplier and buy price to compare rates.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
       <h3 className="sec">
         <span>Recent purchases</span>
