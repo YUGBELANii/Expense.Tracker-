@@ -260,18 +260,16 @@ export default function RestockSection({ products, suppliers, brands, manufactur
                 {group.contactPerson ? ` · ${group.contactPerson}` : ''}
               </b>
               <div className="act">
-                {group.supplierId && (
-                  {!invalidOrderQty && (
-                    <a
-                      className="btn small"
-                      href={waLink}
-                      target="_blank"
-                      rel="noreferrer"
-                      title={group.phone ? `WhatsApp ${group.phone}` : 'No phone saved: opens WhatsApp share'}
-                    >
-                      WhatsApp order
-                    </a>
-                  )}
+                {group.supplierId && !invalidOrderQty && (
+                  <a
+                    className="btn small"
+                    href={waLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={group.phone ? `WhatsApp ${group.phone}` : 'No phone saved: opens WhatsApp share'}
+                  >
+                    WhatsApp order
+                  </a>
                 )}
                 <button className="btn ghost small" type="button" disabled={invalidOrderQty} onClick={() => copyMessage(group)}>
                   Copy list
