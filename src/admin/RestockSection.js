@@ -26,6 +26,8 @@ export default function RestockSection({ products, suppliers, brands, manufactur
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const [thresholdDrafts, setThresholdDrafts] = useState({});
+  const [orderQtyDrafts, setOrderQtyDrafts] = useState({});
+  const [excludedRestockItems, setExcludedRestockItems] = useState({});
   const [supplierDrafts, setSupplierDrafts] = useState({});
   const [savingProductId, setSavingProductId] = useState(null);
   const [showThresholdEditor, setShowThresholdEditor] = useState(false);
@@ -104,9 +106,21 @@ export default function RestockSection({ products, suppliers, brands, manufactur
     return list;
   }, [items, restockSearch, restockCategory, restockSupplierFilter, restockSort]);
 
+  const selectedRestockItems = useMemo(
+    () => filteredItems
+      .filter(item => !excludedRestockItems[item.productId])
+      .map(item => ({
+        ...item,
+        suggestedQty: orderQtyDrafts[item.productId] !== undefined
+          ? (orderQtyDrafts[item.productId] === '' ? null : Number(orderQtyDrafts[item.productId]))
+          : item.suggestedQty
+      })),
+    [filteredItems, excludedRestockItems, orderQtyDrafts]
+  );
+
   const groups = useMemo(
-    () => groupBySupplier(filteredItems, (suppliers || []).filter(s => s.active)),
-    [filteredItems, suppliers]
+    () => groupBySupplier(selectedRestockItems, (suppliers || []).filter(s => s.active)),
+    [selectedRestockItems, suppliers]
   );
 
   const outCount = items.filter(i => i.state === 'out').length;
@@ -119,7 +133,7 @@ export default function RestockSection({ products, suppliers, brands, manufactur
     try {
       if (!sb) throw new Error('Supabase is not configured.');
       const value = raw === '' || raw === undefined ? null : Number(raw);
-      if (value !== null && !(value >= 0)) throw new Error('Threshold must be zero or more.');
+      if (value !== null && (!Number.isFinite(value) || value < 0)) throw new Error('Threshold must be a finite number zero or more.');
       await ok(sb.from('products').update({ low_stock_threshold: value }).eq('id', productId));
       flash('Low-stock level saved.');
       if (onChanged) await onChanged();
@@ -260,6 +274,7 @@ export default function RestockSection({ products, suppliers, brands, manufactur
                     <th>Manufacturer</th>
                     <th>Left</th>
                     <th>Threshold</th>
+                    <th>Include</th>
                     <th>Order qty</th>
                     <th>Last rate</th>
                     <th>Last bought</th>
@@ -278,7 +293,25 @@ export default function RestockSection({ products, suppliers, brands, manufactur
                       <td>{item.manufacturerName || '–'}</td>
                       <td>{item.quantity} {item.unit}</td>
                       <td>{item.threshold ?? DEFAULT_LOW_STOCK_THRESHOLD}</td>
-                      <td>{item.suggestedQty ? `${item.suggestedQty} ${item.unit}` : 'ask supplier'}</td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={!excludedRestockItems[item.productId]}
+                          onChange={e => setExcludedRestockItems(current => ({ ...current, [item.productId]: !e.target.checked }))}
+                          aria-label={`Include ${item.name} in restock order`}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          style={{ maxWidth: 110 }}
+                          value={orderQtyDrafts[item.productId] ?? (item.suggestedQty ?? '')}
+                          onChange={e => setOrderQtyDrafts(current => ({ ...current, [item.productId]: e.target.value }))}
+                          aria-label={`Order quantity for ${item.name}`}
+                        />
+                      </td>
                       <td>{item.lastBuyPrice != null ? inr(item.lastBuyPrice) : '–'}</td>
                       <td>{item.lastPurchaseDate || '–'}{item.lastBatchNumber ? ` (batch ${item.lastBatchNumber})` : ''}{item.lastExpiryDate ? ` exp ${item.lastExpiryDate}` : ''}</td>
                       <td>
