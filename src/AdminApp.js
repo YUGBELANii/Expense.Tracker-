@@ -5,6 +5,7 @@ import { sb, isAdminUser } from './lib/supabase';
 import SuppliersSection from './admin/SuppliersSection';
 import PurchasesSection from './admin/PurchasesSection';
 import RestockSection from './admin/RestockSection';
+import StockSection from './admin/StockSection';
 
 const TARGET_MIN = 8000;
 const TARGET_MAX = 10000;
@@ -51,7 +52,6 @@ const emptyProduct = () => ({
   buy_price: '',
   sell_price: '',
   mrp: '',
-  quantity: '',
   barcode: '',
   raw_barcode: '',
   pack_size: '',
@@ -374,7 +374,6 @@ export default function AdminApp() {
         buy_price: product.buy_price ?? '',
         sell_price: product.sell_price ?? '',
         mrp: product.mrp ?? '',
-        quantity: product.quantity ?? '',
         barcode: product.barcode || '',
         raw_barcode: product.raw_barcode || '',
         pack_size: product.pack_size || '',
@@ -411,7 +410,6 @@ export default function AdminApp() {
 
     const buy = Number(f.buy_price);
     const sell = Number(f.sell_price);
-    const quantity = Number(f.quantity);
     const mrp = f.mrp === '' ? null : Number(f.mrp);
 
     if (!f.name.trim()) {
@@ -422,15 +420,13 @@ export default function AdminApp() {
     if (
       f.buy_price === '' ||
       f.sell_price === '' ||
-      f.quantity === '' ||
       !Number.isFinite(buy) ||
       !Number.isFinite(sell) ||
-      !Number.isFinite(quantity) ||
       buy < 0 ||
       sell < 0 ||
-      quantity < 0
+      false
     ) {
-      setErr('Enter valid non-negative prices and quantity.');
+      setErr('Enter valid non-negative prices.');
       return;
     }
 
@@ -460,7 +456,6 @@ export default function AdminApp() {
       buy_price: buy,
       sell_price: sell,
       mrp,
-      quantity,
       barcode: f.barcode.trim() || null,
       raw_barcode: f.raw_barcode.trim() || null,
       pack_size: f.pack_size.trim() || null,
@@ -1329,22 +1324,7 @@ export default function AdminApp() {
                   />
                 </label>
 
-                <label>
-                  Quantity *
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.001"
-                    value={productForm.quantity}
-                    onChange={e => setProductForm({
-                      ...productForm,
-                      quantity: e.target.value
-                    })}
-                    required
-                  />
-                </label>
-
-                <label>
+<label>
                   Barcode
                   <input
                     value={productForm.barcode}
@@ -1436,32 +1416,10 @@ export default function AdminApp() {
                 </label>
               </div>
 
-              <div className="preview">
-                <span>Investment</span>
-                <b>
-                  {inr(
-                    (Number(productForm.buy_price) || 0) *
-                    (Number(productForm.quantity) || 0)
-                  )}
-                </b>
-
-                <span>Potential selling value</span>
-                <b>
-                  {inr(
-                    (Number(productForm.sell_price) || 0) *
-                    (Number(productForm.quantity) || 0)
-                  )}
-                </b>
-
-                <span>Potential profit</span>
-                <b>
-                  {inr(
-                    (
-                      (Number(productForm.sell_price) || 0) -
-                      (Number(productForm.buy_price) || 0)
-                    ) * (Number(productForm.quantity) || 0)
-                  )}
-                </b>
+              <div className="notice">
+                Stock is managed in Stock Management. {productForm.id
+                  ? `Current total: ${Number((products.find(p => p.id === productForm.id) || {}).quantity || 0)} units.`
+                  : 'New products start with zero stock.'}
               </div>
 
               <div className="row">
@@ -2203,6 +2161,10 @@ export default function AdminApp() {
             })}
           </div>
         </section>
+      )}
+
+      {section === 'stock' && (
+        <StockSection products={products} onChanged={loadAll} />
       )}
 
       {/* SUPPLIERS, PURCHASES AND RESTOCK */}
