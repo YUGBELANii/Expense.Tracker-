@@ -36,10 +36,68 @@ export function suggestedQuantity(product, lastBatch, defaultThreshold = 3) {
   return null;
 }
 
+
+// Builds each product's supplier choices from its own purchase history.
+// Only the newest priced purchase per supplier is used; no cross-product
+// or package-size matching is attempted.
+export function buildSupplierOptionsByProduct(purchaseRows = [], suppliers = []) {
+  const activeSuppliers = (suppliers || []).filter(s => s.active !== false);
+  const supplierById = Object.fromEntries(activeSuppliers.map(s => [s.id, s]));
+  const latestByKey = new Map();
+
+  (purchaseRows || []).forEach(row => {
+    if (!row?.product_id || !row?.supplier_id || !supplierById[row.supplier_id]) return;
+    const price = row.buy_price === null || row.buy_price === undefined || row.buy_price === ''
+      ? null
+      : Number(row.buy_price);
+    if (price === null || !Number.isFinite(price) || price < 0) return;
+
+    const key = `${row.product_id}:${row.supplier_id}`;
+    const current = latestByKey.get(key);
+    const rowStamp = `${row.purchase_date || ''}|${row.created_at || ''}`;
+    const currentStamp = current ? `${current.purchase_date || ''}|${current.created_at || ''}` : '';
+    if (!current || rowStamp >= currentStamp) latestByKey.set(key, row);
+  });
+
+  const productIds = new Set((purchaseRows || []).map(row => row?.product_id).filter(Boolean));
+  const result = {};
+
+  productIds.forEach(productId => {
+    const options = activeSuppliers.map(supplier => {
+      const row = latestByKey.get(`${productId}:${supplier.id}`) || null;
+      return {
+        supplierId: supplier.id,
+        supplierName: supplier.name,
+        phone: supplier.phone || null,
+        contactPerson: supplier.contact_person || null,
+        latestBuyPrice: row ? Number(row.buy_price) : null,
+        lastPurchaseDate: row ? row.purchase_date : null,
+        hasPurchaseHistory: Boolean(row)
+      };
+    }).sort((a, b) => {
+      if (a.latestBuyPrice === null && b.latestBuyPrice !== null) return 1;
+      if (a.latestBuyPrice !== null && b.latestBuyPrice === null) return -1;
+      if (a.latestBuyPrice !== null && b.latestBuyPrice !== null && a.latestBuyPrice !== b.latestBuyPrice) {
+        return a.latestBuyPrice - b.latestBuyPrice;
+      }
+      return a.supplierName.localeCompare(b.supplierName);
+    });
+
+    const priced = options.filter(option => option.latestBuyPrice !== null);
+    const lowest = priced.length ? priced[0].latestBuyPrice : null;
+    result[productId] = options.map(option => ({
+      ...option,
+      isCheapest: lowest !== null && option.latestBuyPrice === lowest
+    }));
+  });
+
+  return result;
+}
+
 // Builds the flat list of items that need restocking, resolving
 // brand -> manufacturer and the supplier to order from
-// (preferred supplier on the product, else supplier of the last purchase).
-export function buildRestockItems({ products = [], brands = [], manufacturers = [], lastBatchByProduct = {}, defaultThreshold = 3 }) {
+// (saved preference, else lowest latest recorded rate, else last purchase supplier).
+export function buildRestockItems({ products = [], brands = [], manufacturers = [], lastBatchByProduct = {}, supplierOptionsByProduct = {}, suppliers = [], defaultThreshold = 3 }) {
   const brandById = Object.fromEntries(brands.map(b => [b.id, b]));
   const manufacturerById = Object.fromEntries(manufacturers.map(m => [m.id, m]));
 
@@ -54,6 +112,29 @@ export function buildRestockItems({ products = [], brands = [], manufacturers = 
       const last = lastBatchByProduct[product.id] || null;
       const rawThr = product.low_stock_threshold;
       const effectiveThr = (rawThr !== null && rawThr !== undefined && rawThr !== '') ? Number(rawThr) : Number(defaultThreshold);
+      const activeSuppliers = (suppliers || []).filter(s => s.active !== false);
+      const knownOptions = supplierOptionsByProduct[product.id] || [];
+      const knownById = Object.fromEntries(knownOptions.map(option => [option.supplierId, option]));
+      const supplierOptions = activeSuppliers.map(supplier => knownById[supplier.id] || ({
+        supplierId: supplier.id,
+        supplierName: supplier.name,
+        phone: supplier.phone || null,
+        contactPerson: supplier.contact_person || null,
+        latestBuyPrice: null,
+        lastPurchaseDate: null,
+        hasPurchaseHistory: false,
+        isCheapest: false
+      })).sort((a, b) => {
+        if (a.latestBuyPrice === null && b.latestBuyPrice !== null) return 1;
+        if (a.latestBuyPrice !== null && b.latestBuyPrice === null) return -1;
+        if (a.latestBuyPrice !== null && b.latestBuyPrice !== null && a.latestBuyPrice !== b.latestBuyPrice) {
+          return a.latestBuyPrice - b.latestBuyPrice;
+        }
+        return a.supplierName.localeCompare(b.supplierName);
+      });
+      const cheapestOption = supplierOptions.find(option => option.latestBuyPrice !== null) || null;
+      const autoSupplierId = (cheapestOption && cheapestOption.supplierId) || (last ? last.supplier_id : null) || null;
+      const supplierId = product.preferred_supplier_id || autoSupplierId;
 
       return {
         productId: product.id,
@@ -67,7 +148,10 @@ export function buildRestockItems({ products = [], brands = [], manufacturers = 
         state,
         brandName: brand ? brand.name : null,
         manufacturerName: manufacturer ? manufacturer.name : null,
-        supplierId: product.preferred_supplier_id || (last ? last.supplier_id : null) || null,
+        supplierId,
+        autoSupplierId,
+        cheapestSupplierId: cheapestOption ? cheapestOption.supplierId : null,
+        supplierOptions,
         lastBuyPrice: last && last.buy_price != null ? Number(last.buy_price) : null,
         lastPurchaseDate: last ? last.purchase_date : null,
         lastBatchNumber: last ? last.batch_number : null,

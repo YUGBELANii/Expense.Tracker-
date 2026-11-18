@@ -45,8 +45,11 @@ app keeps working.
 - **Manufacturer** is resolved through the existing chain
   `products.brand_id → brands.manufacturer_id → manufacturers` (manage in the
   Manufacturer Assigner / Manufacturers tabs).
-- **Supplier** for restock = `products.preferred_supplier_id`, falling back to the supplier of
-  the most recent purchase batch.
+- **Supplier** for restock = the saved `products.preferred_supplier_id` when present; otherwise
+  the lowest latest recorded purchase rate for that same product, falling back to the supplier of
+  the most recent purchase batch when no priced supplier history exists. The Restock board lets you
+  compare each active supplier's latest recorded rate for the same product, switch the order
+  destination, and save that choice as the preferred supplier. These are historical rates, not live quotes.
 - The old free-text `products.supplier` / `invoice` / `purchase_date` columns are untouched;
   purchase batches are the structured replacement going forward.
 

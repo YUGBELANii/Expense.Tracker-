@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { sb } from '../lib/supabase';
 import {
   buildRestockItems,
+  buildSupplierOptionsByProduct,
   groupBySupplier,
   buildRestockMessage,
   buildWhatsAppLink,
@@ -22,6 +23,7 @@ const inr = n => '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractio
 // WhatsApp order message per supplier and copy-paste fallback.
 export default function RestockSection({ products, suppliers, brands, manufacturers, onChanged }) {
   const [lastBatchByProduct, setLastBatchByProduct] = useState({});
+  const [purchaseRows, setPurchaseRows] = useState([]);
   const [loadingBatches, setLoadingBatches] = useState(false);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
@@ -50,30 +52,41 @@ export default function RestockSection({ products, suppliers, brands, manufactur
       const lowOutIds = prods.filter(p => stockState(p, DEFAULT_LOW_STOCK_THRESHOLD) !== 'ok').map(p => p.id);
       if (lowOutIds.length === 0) {
         setLastBatchByProduct({});
+        setPurchaseRows([]);
         setLoadingBatches(false);
         return;
       }
-      // Fetch batches for only low/out products (chunk if needed)
+      // Fetch purchase history only for low/out products. Page each chunk so
+      // supplier alternatives are not silently lost at the Data API row cap.
       const chunks = [];
       for (let i = 0; i < lowOutIds.length; i += 200) chunks.push(lowOutIds.slice(i, i + 200));
       const allRows = [];
       for (const chunk of chunks) {
-        const rows = await ok(
-          sb.from('purchase_batches')
-            .select('product_id, supplier_id, quantity, buy_price, purchase_date, batch_number, expiry_date')
-            .in('product_id', chunk)
-            .order('purchase_date', { ascending: false })
-            .order('created_at', { ascending: false })
-        );
-        allRows.push(...(rows || []));
+        let offset = 0;
+        while (true) {
+          const rows = await ok(
+            sb.from('purchase_batches')
+              .select('product_id, supplier_id, quantity, buy_price, purchase_date, batch_number, expiry_date, created_at')
+              .in('product_id', chunk)
+              .order('purchase_date', { ascending: false })
+              .order('created_at', { ascending: false })
+              .range(offset, offset + 999)
+          );
+          allRows.push(...(rows || []));
+          if (!rows || rows.length < 1000) break;
+          offset += 1000;
+        }
       }
       const byProduct = {};
       allRows.forEach(r => {
-        if (!byProduct[r.product_id]) byProduct[r.product_id] = r; // newest first
+        if (!byProduct[r.product_id]) byProduct[r.product_id] = r; // newest batch overall
       });
+      setPurchaseRows(allRows);
       setLastBatchByProduct(byProduct);
     } catch (e) {
       setLastBatchByProduct({});
+      setPurchaseRows([]);
+      setErr('Could not load supplier purchase history: ' + (e.message || e));
     } finally {
       setLoadingBatches(false);
     }
@@ -83,9 +96,22 @@ export default function RestockSection({ products, suppliers, brands, manufactur
     loadLastBatches();
   }, [loadLastBatches]);
 
+  const supplierOptionsByProduct = useMemo(
+    () => buildSupplierOptionsByProduct(purchaseRows, suppliers || []),
+    [purchaseRows, suppliers]
+  );
+
   const items = useMemo(
-    () => buildRestockItems({ products: products || [], brands: brands || [], manufacturers: manufacturers || [], lastBatchByProduct, defaultThreshold: DEFAULT_LOW_STOCK_THRESHOLD }),
-    [products, brands, manufacturers, lastBatchByProduct]
+    () => buildRestockItems({
+      products: products || [],
+      brands: brands || [],
+      manufacturers: manufacturers || [],
+      lastBatchByProduct,
+      supplierOptionsByProduct,
+      suppliers: suppliers || [],
+      defaultThreshold: DEFAULT_LOW_STOCK_THRESHOLD
+    }),
+    [products, brands, manufacturers, lastBatchByProduct, supplierOptionsByProduct, suppliers]
   );
 
   const categories = useMemo(() => {
@@ -111,11 +137,14 @@ export default function RestockSection({ products, suppliers, brands, manufactur
       .filter(item => !excludedRestockItems[item.productId])
       .map(item => ({
         ...item,
+        supplierId: supplierDrafts[item.productId] !== undefined
+          ? (supplierDrafts[item.productId] === '__auto__' ? item.autoSupplierId : (supplierDrafts[item.productId] || null))
+          : item.supplierId,
         suggestedQty: orderQtyDrafts[item.productId] !== undefined
           ? (orderQtyDrafts[item.productId] === '' ? null : Number(orderQtyDrafts[item.productId]))
           : item.suggestedQty
       })),
-    [filteredItems, excludedRestockItems, orderQtyDrafts]
+    [filteredItems, excludedRestockItems, orderQtyDrafts, supplierDrafts]
   );
 
   const groups = useMemo(
@@ -149,17 +178,23 @@ export default function RestockSection({ products, suppliers, brands, manufactur
   }
 
   async function assignSupplier(productId) {
-    const supplierId = supplierDrafts[productId];
-    if (!supplierId) return;
+    const draft = supplierDrafts[productId];
+    if (draft === undefined) return;
+    const supplierId = draft === '__auto__' ? null : (draft || null);
     setSavingProductId(productId);
     setErr('');
     try {
       if (!sb) throw new Error('Supabase is not configured.');
       await ok(sb.from('products').update({ preferred_supplier_id: supplierId }).eq('id', productId));
-      flash('Supplier assigned for restock.');
+      setSupplierDrafts(current => {
+        const next = { ...current };
+        delete next[productId];
+        return next;
+      });
+      flash(supplierId ? 'Preferred restock supplier saved.' : 'Automatic supplier selection restored.');
       if (onChanged) await onChanged();
     } catch (er) {
-      setErr('Could not assign supplier: ' + (er.message || er));
+      setErr('Could not save supplier choice: ' + (er.message || er));
     } finally {
       setSavingProductId(null);
     }
@@ -187,13 +222,11 @@ export default function RestockSection({ products, suppliers, brands, manufactur
     return list.slice(0, 60);
   }, [products, thresholdSearch]);
 
-  const activeSuppliers = (suppliers || []).filter(s => s.active);
-
   return (
     <section className="admin-card admin-spaced-section">
       <h2 className="sec"><span>Restock board</span></h2>
       <p className="hint">
-        Items at or below their low-stock level (default {DEFAULT_LOW_STOCK_THRESHOLD} units, unless a custom level is set) or out of stock. Grouped by supplier for ordering. Use WhatsApp or copy the list.
+        Items at or below their low-stock level (default {DEFAULT_LOW_STOCK_THRESHOLD} units, unless a custom level is set) or out of stock. Grouped by supplier. Compare each supplier's latest recorded rate for the same product, choose who to order from, then use WhatsApp or copy the list. Rates are purchase history, not live quotes.
       </p>
 
       {msg && <div className="notice ok">{msg}</div>}
@@ -293,7 +326,7 @@ export default function RestockSection({ products, suppliers, brands, manufactur
                     <th>Last rate</th>
                     <th>Last bought</th>
                     <th>Status</th>
-                    {!group.supplierId && <th>Assign supplier</th>}
+                    <th>Order from / latest rate</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -333,29 +366,39 @@ export default function RestockSection({ products, suppliers, brands, manufactur
                           {item.state === 'out' ? 'Out of stock' : 'Low stock'}
                         </span>
                       </td>
-                      {!group.supplierId && (
-                        <td>
-                          <div className="act">
-                            <select
-                              value={supplierDrafts[item.productId] || ''}
-                              onChange={e => setSupplierDrafts({ ...supplierDrafts, [item.productId]: e.target.value })}
-                            >
-                              <option value="">Choose...</option>
-                              {activeSuppliers.map(s => (
-                                <option key={s.id} value={s.id}>{s.name}</option>
-                              ))}
-                            </select>
-                            <button
-                              className="btn ghost small"
-                              type="button"
-                              disabled={!supplierDrafts[item.productId] || savingProductId === item.productId}
-                              onClick={() => assignSupplier(item.productId)}
-                            >
-                              Set
-                            </button>
-                          </div>
-                        </td>
-                      )}
+                      <td>
+                        <div className="act">
+                          <select
+                            value={supplierDrafts[item.productId] ?? item.supplierId ?? ''}
+                            onChange={e => setSupplierDrafts(current => ({ ...current, [item.productId]: e.target.value }))}
+                            aria-label={`Supplier for ${item.name}`}
+                          >
+                            <option value="">Choose supplier...</option>
+                            <option value="__auto__">Auto: lowest recorded rate / last supplier</option>
+                            {item.supplierOptions.map(option => (
+                              <option key={option.supplierId} value={option.supplierId}>
+                                {option.supplierName}
+                                {option.latestBuyPrice !== null
+                                  ? ` — ${inr(option.latestBuyPrice)}${option.lastPurchaseDate ? ` · ${option.lastPurchaseDate}` : ''}${option.isCheapest ? ' · Lowest rate' : ''}`
+                                  : ' — no recorded rate'}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            className="btn ghost small"
+                            type="button"
+                            disabled={supplierDrafts[item.productId] === undefined || savingProductId === item.productId}
+                            onClick={() => assignSupplier(item.productId)}
+                          >
+                            {savingProductId === item.productId ? 'Saving...' : 'Save'}
+                          </button>
+                        </div>
+                        {item.cheapestSupplierId && (
+                          <small className="hint">
+                            Lowest recorded: {item.supplierOptions.find(option => option.supplierId === item.cheapestSupplierId)?.supplierName || 'Supplier'} · {inr(item.supplierOptions.find(option => option.supplierId === item.cheapestSupplierId)?.latestBuyPrice)}
+                          </small>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
