@@ -137,7 +137,7 @@ export default function StockSection({ products = [], onChanged }) {
     if (!reason.trim()) return setError('A reason is required for the stock history.');
     setSaving(true);
     try {
-      const adjustments = [{ product_id: productId, location_id: locationId, mode: operation, quantity: amount }];
+      const adjustments = [{ product_id: productId, location_id: locationId, mode: operation === 'set' ? 'reconcile' : 'add', quantity: amount }];
       await ok(sb.rpc('apply_stock_adjustments', {
         p_request_id: requestForPayload(adjustmentRequestRef, { adjustments, reason: reason.trim() }),
         p_adjustments: adjustments,
@@ -254,7 +254,7 @@ export default function StockSection({ products = [], onChanged }) {
             <label>Operation
               <select value={operation} onChange={e => setOperation(e.target.value)}>
                 <option value="add">Add stock (increase)</option>
-                <option value="set">Set current stock (replace this location's quantity)</option>
+                <option value="set">Set physical quantity (reconcile Unassigned stock)</option>
               </select>
             </label>
             <label>Quantity {operation === 'add' ? 'to add' : 'to set'}
@@ -266,7 +266,7 @@ export default function StockSection({ products = [], onChanged }) {
           </div>
           {selectedProduct && locationId && (
             <p className="hint">
-              Current in {locationById[locationId]?.name}: {balanceByKey[selectedProduct.id + ':' + locationId] || 0} {selectedProduct.unit}. Total product stock: {number(selectedProduct.quantity)}.
+              Current in {locationById[locationId]?.name}: {balanceByKey[selectedProduct.id + ':' + locationId] || 0} {selectedProduct.unit}. Total product stock: {number(selectedProduct.quantity)}. Setting a physical quantity reconciles the rack and moves available Unassigned stock first.
             </p>
           )}
           <div className="row"><button className="btn" type="submit" disabled={saving || loading}>{saving ? 'Saving…' : 'Save stock operation'}</button></div>
