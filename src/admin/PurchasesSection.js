@@ -371,9 +371,11 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
                   {!row.lowest && row.differencePercent !== null ? <small> ({row.differencePercent.toFixed(1)}%)</small> : null}
                 </td>
                 <td>
-                  {row.lowest
-                    ? <span className="tag ok">Lowest recorded</span>
-                    : row.comparable ? 'Higher recorded rate' : 'Only one supplier recorded'}
+                  {!row.comparable
+                    ? 'Only one supplier recorded'
+                    : row.lowest
+                      ? <span className="tag ok">Lowest recorded</span>
+                      : 'Higher recorded rate'}
                 </td>
               </tr>
             ))}
