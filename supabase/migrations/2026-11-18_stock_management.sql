@@ -37,8 +37,9 @@ create index if not exists stock_movements_product_created_idx
   on public.stock_movements(product_id, created_at desc);
 create index if not exists stock_movements_location_created_idx
   on public.stock_movements(location_id, created_at desc);
-create unique index if not exists stock_movements_request_product_uidx
-  on public.stock_movements(request_id, product_id)
+drop index if exists public.stock_movements_request_product_uidx;
+create unique index if not exists stock_movements_request_product_location_uidx
+  on public.stock_movements(request_id, product_id, location_id)
   where request_id is not null;
 
 insert into public.stock_locations(name, is_system)
@@ -128,6 +129,10 @@ declare
   v_total numeric;
   v_type text;
   v_exists boolean;
+  v_unassigned_id uuid;
+  v_source_before numeric;
+  v_transfer numeric;
+  v_location_name text;
 begin
   if auth.uid() is null or not public.is_admin() then
     raise exception 'Admin access required' using errcode = '42501';
@@ -207,6 +212,49 @@ begin
     end if;
 
     v_delta := v_after - v_before;
+
+    -- When a physical count increases a rack balance, move available opening
+    -- stock out of Unassigned first. This prevents double-counting the opening
+    -- balance when stock is physically placed onto a rack.
+    if v_item.mode = 'reconcile' and v_delta > 0 then
+      select l.id into v_unassigned_id
+      from public.stock_locations l
+      where l.name = 'Unassigned';
+
+      if v_unassigned_id is not null and v_unassigned_id <> v_item.location_id then
+        insert into public.stock_balances(product_id, location_id, quantity)
+        values (v_item.product_id, v_unassigned_id, 0)
+        on conflict (product_id, location_id) do nothing;
+
+        select b.quantity into v_source_before
+        from public.stock_balances b
+        where b.product_id = v_item.product_id
+          and b.location_id = v_unassigned_id
+        for update;
+
+        v_transfer := least(v_delta, v_source_before);
+        if v_transfer > 0 then
+          update public.stock_balances b
+          set quantity = v_source_before - v_transfer, updated_at = now()
+          where b.product_id = v_item.product_id
+            and b.location_id = v_unassigned_id;
+
+          select l.name into v_location_name
+          from public.stock_locations l
+          where l.id = v_item.location_id;
+
+          insert into public.stock_movements(
+            product_id, location_id, movement_type, quantity_delta,
+            quantity_before, quantity_after, reason, request_id
+          ) values (
+            v_item.product_id, v_unassigned_id, 'reconciliation', -v_transfer,
+            v_source_before, v_source_before - v_transfer,
+            trim(p_reason) || ' (moved to ' || coalesce(v_location_name, 'rack') || ')',
+            p_request_id
+          );
+        end if;
+      end if;
+    end if;
 
     update public.stock_balances b
     set quantity = v_after, updated_at = now()

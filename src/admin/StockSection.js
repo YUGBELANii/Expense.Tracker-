@@ -244,7 +244,7 @@ export default function StockSection({ products = [], onChanged }) {
 
       <div className="admin-card">
         <h3 style={{ marginTop: 0 }}>Physical count & reconciliation</h3>
-        <p className="hint">Enter physical quantities for the selected location. Blank rows are ignored. Review your entries, then confirm once; the database applies the entire reconciliation atomically.</p>
+        <p className="hint">Enter physical quantities for the selected location. Blank rows are ignored. If a rack count is higher than its current balance, the increase is first transferred from Unassigned stock (so opening inventory is not double-counted). Any remaining excess increases total stock. A shortage reduces stock. The entire reconciliation is atomic.</p>
         <div className="tools">
           <input type="search" value={countSearch} onChange={e => setCountSearch(e.target.value)} placeholder="Filter products to count…" aria-label="Search products for reconciliation" />
         </div>
