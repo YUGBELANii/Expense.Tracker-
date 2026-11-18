@@ -3,6 +3,7 @@ import { NavLink, Link, useLocation } from 'react-router-dom';
 
 export default function AppLayout({ children }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [sidebarHidden, setSidebarHidden] = useState(false);
   const location = useLocation();
   const isAdmin = location.pathname.startsWith('/admin');
 
@@ -45,8 +46,23 @@ export default function AppLayout({ children }) {
   return (
     <div className="app-shell">
       <div className={`app-drawer-backdrop ${drawerOpen ? 'open' : ''}`} onClick={closeDrawer} aria-hidden="true" />
-      <aside className={`app-sidebar ${drawerOpen ? 'mobile-open' : ''}`}>
-        <div className="app-sidebar-brand">Expense Tracker</div>
+      <aside className={`app-sidebar ${drawerOpen ? 'mobile-open' : ''} ${sidebarHidden ? 'desktop-hidden' : ''}`}>
+        <div className="app-sidebar-brand">
+          <span>Expense Tracker</span>
+          <button
+            type="button"
+            className="app-sidebar-hide"
+            onClick={() => {
+              if (window.matchMedia('(max-width: 900px)').matches) closeDrawer();
+              else setSidebarHidden(true);
+            }}
+            aria-label="Hide navigation menu"
+            title="Hide navigation menu"
+          >
+            <span aria-hidden="true">‹</span>
+            <span className="hide-label">Hide</span>
+          </button>
+        </div>
         <div className="app-sidebar-section">Navigation</div>
         <ul className="app-nav">
           {navItems.map(item => (
@@ -84,6 +100,18 @@ export default function AppLayout({ children }) {
         </ul>
       </aside>
       <div className="app-main">
+        {sidebarHidden && (
+          <button
+            type="button"
+            className="app-nav-reopen"
+            onClick={() => setSidebarHidden(false)}
+            aria-label="Show navigation menu"
+            title="Show navigation menu"
+          >
+            <span aria-hidden="true">☰</span>
+            <span>Show menu</span>
+          </button>
+        )}
         <div className="app-mobile-bar">
           <button type="button" aria-label="Open menu" onClick={() => setDrawerOpen(true)}>☰</button>
           <span className="title">{isAdmin ? 'Admin' : 'Ledger'}</span>

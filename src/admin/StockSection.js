@@ -36,6 +36,11 @@ export default function StockSection({ products = [], onChanged }) {
   const [search, setSearch] = useState('');
   const [counts, setCounts] = useState({});
   const [countSearch, setCountSearch] = useState('');
+  const [categoryTarget, setCategoryTarget] = useState('');
+  const [categorySearch, setCategorySearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('unassigned');
+  const [categorySelectedIds, setCategorySelectedIds] = useState(new Set());
+  const [categorySaving, setCategorySaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -95,6 +100,20 @@ export default function StockSection({ products = [], onChanged }) {
     return products.filter(product => !term || `${product.name || ''} ${product.category || ''} ${product.barcode || ''}`.toLowerCase().includes(term));
   }, [products, search]);
 
+  const availableCategories = useMemo(() => [...new Set(
+    products.map(product => (product.category || '').trim()).filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b)), [products]);
+
+  const categoryProducts = useMemo(() => {
+    const term = categorySearch.trim().toLowerCase();
+    return products.filter(product => {
+      const category = (product.category || '').trim();
+      if (categoryFilter === 'unassigned' && category) return false;
+      if (categoryFilter === 'assigned' && !category) return false;
+      return !term || `${product.name || ''} ${category}`.toLowerCase().includes(term);
+    });
+  }, [products, categorySearch, categoryFilter]);
+
   const countProducts = useMemo(() => {
     const term = countSearch.trim().toLowerCase();
     return products.filter(product => !term || `${product.name || ''} ${product.category || ''}`.toLowerCase().includes(term));
@@ -124,6 +143,42 @@ export default function StockSection({ products = [], onChanged }) {
       difference: physicalTotal - systemTotal
     };
   }, [products, counts, balanceByKey, locationId]);
+
+  function toggleCategoryProduct(productId) {
+    setCategorySelectedIds(current => {
+      const next = new Set(current);
+      if (next.has(productId)) next.delete(productId);
+      else next.add(productId);
+      return next;
+    });
+  }
+
+  async function assignCategory(e) {
+    e.preventDefault();
+    const category = categoryTarget.trim();
+    const ids = [...categorySelectedIds];
+    if (!category) {
+      setError('Choose or enter a category first.');
+      return;
+    }
+    if (!ids.length) {
+      setError('Select at least one product to assign.');
+      return;
+    }
+    setCategorySaving(true);
+    setError('');
+    setMessage('');
+    try {
+      await ok(sb.from('products').update({ category }).in('id', ids));
+      setCategorySelectedIds(new Set());
+      setMessage(`Assigned "${category}" to ${ids.length} product(s).`);
+      if (onChanged) await onChanged();
+    } catch (e2) {
+      setError('Could not assign category: ' + (e2.message || e2));
+    } finally {
+      setCategorySaving(false);
+    }
+  }
 
   async function createLocation(e) {
     e.preventDefault();
@@ -239,6 +294,89 @@ export default function StockSection({ products = [], onChanged }) {
         <div className="tot"><span>Total units (all locations)</span><b>{totalStock.toLocaleString('en-IN')}</b></div>
         <div className="tot profit"><span>{locationById[locationId]?.name || 'Selected location'} quantity</span><b>{selectedLocationTotal.toLocaleString('en-IN')}</b></div>
       </section>
+
+      <div className="admin-card category-assigner">
+        <div className="category-assigner-heading">
+          <div>
+            <h3>Category Assigner</h3>
+            <p className="hint">Bulk-assign products to an existing or new category. Changes are saved to each product record.</p>
+          </div>
+          <span className="category-count">{products.length} products</span>
+        </div>
+        <form className="category-assigner-form" onSubmit={assignCategory}>
+          <label>
+            Category
+            <input
+              list="stock-category-options"
+              value={categoryTarget}
+              onChange={e => setCategoryTarget(e.target.value)}
+              placeholder="Choose or type a category"
+              maxLength={80}
+              required
+            />
+            <datalist id="stock-category-options">
+              {availableCategories.map(category => <option key={category} value={category} />)}
+            </datalist>
+          </label>
+          <div className="category-assigner-filters">
+            <input
+              type="search"
+              value={categorySearch}
+              onChange={e => setCategorySearch(e.target.value)}
+              placeholder="Search products…"
+              aria-label="Search products for category assignment"
+            />
+            <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} aria-label="Filter category assignment products">
+              <option value="unassigned">Unassigned only</option>
+              <option value="assigned">Already categorised</option>
+              <option value="all">All products</option>
+            </select>
+          </div>
+          <div className="category-assigner-selection">
+            <span>{categorySelectedIds.size} selected · {categoryProducts.length} shown</span>
+            <button
+              type="button"
+              className="btn ghost small"
+              onClick={() => setCategorySelectedIds(new Set(categoryProducts.map(product => product.id)))}
+              disabled={!categoryProducts.length || categorySaving}
+            >
+              Select shown
+            </button>
+            <button
+              type="button"
+              className="btn ghost small"
+              onClick={() => setCategorySelectedIds(new Set())}
+              disabled={!categorySelectedIds.size || categorySaving}
+            >
+              Clear selection
+            </button>
+          </div>
+          <div className="category-assigner-list">
+            {categoryProducts.map(product => (
+              <label className="category-product-option" key={product.id}>
+                <input
+                  type="checkbox"
+                  checked={categorySelectedIds.has(product.id)}
+                  onChange={() => toggleCategoryProduct(product.id)}
+                  disabled={categorySaving}
+                />
+                <span className="category-product-name">{product.name}</span>
+                <span className={product.category ? 'category-current' : 'category-current is-empty'}>
+                  {product.category || 'Unassigned'}
+                </span>
+              </label>
+            ))}
+            {!categoryProducts.length && (
+              <p className="empty">No products match this filter.</p>
+            )}
+          </div>
+          <div className="row category-assigner-actions">
+            <button className="btn" type="submit" disabled={categorySaving || !categoryTarget.trim() || !categorySelectedIds.size}>
+              {categorySaving ? 'Assigning…' : `Assign category to ${categorySelectedIds.size} product(s)`}
+            </button>
+          </div>
+        </form>
+      </div>
 
       <div className="admin-card">
         <h3 style={{ marginTop: 0 }}>Locations / racks</h3>
