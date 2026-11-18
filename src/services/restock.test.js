@@ -94,6 +94,29 @@ describe('buildRestockItems', () => {
     expect(items[0].supplierId).toBe('s1');
     expect(items[1].supplierId).toBe('s2');
   });
+
+  test('uses the cheapest latest supplier rate unless a preferred supplier is saved', () => {
+    const purchaseRows = [
+      { product_id: 'p2', supplier_id: 's1', buy_price: 13, purchase_date: '2026-11-15', created_at: '2026-11-15T10:00:00Z' },
+      { product_id: 'p2', supplier_id: 's2', buy_price: 11.5, purchase_date: '2026-11-10', created_at: '2026-11-10T10:00:00Z' }
+    ];
+    const supplierOptionsByProduct = buildSupplierOptionsByProduct(purchaseRows, suppliers);
+    const automatic = buildRestockItems({
+      products: [{ id: 'p2', name: 'Maggi Noodles', quantity: 0 }],
+      suppliers,
+      supplierOptionsByProduct
+    })[0];
+    const preferred = buildRestockItems({
+      products: [{ id: 'p2', name: 'Maggi Noodles', quantity: 0, preferred_supplier_id: 's1' }],
+      suppliers,
+      supplierOptionsByProduct
+    })[0];
+
+    expect(automatic.supplierId).toBe('s2');
+    expect(automatic.cheapestSupplierId).toBe('s2');
+    expect(preferred.supplierId).toBe('s1');
+    expect(preferred.cheapestSupplierId).toBe('s2');
+  });
   test('carries last purchase info and suggested quantity', () => {
     expect(items[1].lastBuyPrice).toBe(11.5);
     expect(items[1].suggestedQty).toBe(48);
