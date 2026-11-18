@@ -109,6 +109,7 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
     }
 
     setSaving(true);
+    let purchaseSaved = false;
     try {
       if (!sb) throw new Error('Supabase is not configured.');
 
@@ -130,7 +131,7 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
       // Call the atomic purchase-history RPC. It never changes stock.
       const { error: rpcError } = await sb.rpc('record_purchase', rpcPayload);
       if (rpcError) throw rpcError;
-
+      purchaseSaved = true;
 
       requestIdRef.current = null; // purchase committed; next submission gets a fresh key
       flash('Purchase record saved. Stock was not changed.');
@@ -141,8 +142,10 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
       await loadBatches();
       if (onChanged) await onChanged();
     } catch (er) {
-      // Do NOT clear requestIdRef on failure so a retry reuses the same request_id (idempotency)
-      setErr('Could not save purchase: ' + (er.message || er));
+      // Keep the same request ID when the database did not confirm the purchase.
+      setErr(purchaseSaved
+        ? 'Purchase was saved, but the screen could not refresh. Reload to see the saved record. ' + (er.message || er)
+        : 'Could not save purchase: ' + (er.message || er));
     } finally {
       setSaving(false);
     }
