@@ -122,6 +122,10 @@ export default function RestockSection({ products, suppliers, brands, manufactur
     () => groupBySupplier(selectedRestockItems, (suppliers || []).filter(s => s.active)),
     [selectedRestockItems, suppliers]
   );
+  const invalidOrderQty = selectedRestockItems.some(item => {
+    const raw = orderQtyDrafts[item.productId];
+    return raw !== undefined && raw !== '' && (!Number.isFinite(Number(raw)) || Number(raw) <= 0);
+  });
 
   const outCount = items.filter(i => i.state === 'out').length;
   const lowCount = items.length - outCount;
@@ -162,6 +166,10 @@ export default function RestockSection({ products, suppliers, brands, manufactur
   }
 
   async function copyMessage(group) {
+    if (invalidOrderQty) {
+      setErr('Every custom order quantity must be a finite number greater than zero. Uncheck an item to leave it out.');
+      return;
+    }
     const text = buildRestockMessage(group);
     try {
       await navigator.clipboard.writeText(text);
@@ -234,6 +242,12 @@ export default function RestockSection({ products, suppliers, brands, manufactur
       {items.length > 0 && filteredItems.length === 0 && !loadingBatches && (
         <div className="pad">No items match your search/filter.</div>
       )}
+      {filteredItems.length > 0 && selectedRestockItems.length === 0 && (
+        <div className="pad">All matching items are excluded from the current restock order.</div>
+      )}
+      {invalidOrderQty && (
+        <div className="notice bad">Fix custom order quantities (must be greater than zero) or exclude those items before generating supplier orders.</div>
+      )}
 
       {groups.map(group => {
         const message = buildRestockMessage(group);
@@ -247,17 +261,19 @@ export default function RestockSection({ products, suppliers, brands, manufactur
               </b>
               <div className="act">
                 {group.supplierId && (
-                  <a
-                    className="btn small"
-                    href={waLink}
-                    target="_blank"
-                    rel="noreferrer"
-                    title={group.phone ? `WhatsApp ${group.phone}` : 'No phone saved: opens WhatsApp share'}
-                  >
-                    WhatsApp order
-                  </a>
+                  {!invalidOrderQty && (
+                    <a
+                      className="btn small"
+                      href={waLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={group.phone ? `WhatsApp ${group.phone}` : 'No phone saved: opens WhatsApp share'}
+                    >
+                      WhatsApp order
+                    </a>
+                  )}
                 )}
-                <button className="btn ghost small" type="button" onClick={() => copyMessage(group)}>
+                <button className="btn ghost small" type="button" disabled={invalidOrderQty} onClick={() => copyMessage(group)}>
                   Copy list
                 </button>
               </div>
