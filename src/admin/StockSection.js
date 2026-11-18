@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { sb } from '../lib/supabase';
 
 const ok = async query => {
@@ -14,6 +14,14 @@ const makeRequestId = () => (
 );
 
 const number = value => Number(value || 0);
+
+const requestForPayload = (ref, payload) => {
+  const signature = JSON.stringify(payload);
+  if (!ref.current || ref.current.signature !== signature) {
+    ref.current = { id: makeRequestId(), signature };
+  }
+  return ref.current.id;
+};
 
 export default function StockSection({ products = [], onChanged }) {
   const [locations, setLocations] = useState([]);
@@ -32,9 +40,15 @@ export default function StockSection({ products = [], onChanged }) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const adjustmentRequestRef = useRef(null);
+  const reconciliationRequestRef = useRef(null);
 
   const load = useCallback(async () => {
-    if (!sb) return;
+    if (!sb) {
+      setError('Supabase is not configured.');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError('');
     try {
@@ -62,6 +76,13 @@ export default function StockSection({ products = [], onChanged }) {
   useEffect(() => { load(); }, [load]);
 
   const selectedProduct = products.find(product => product.id === productId) || null;
+
+  function changeLocation(nextLocationId) {
+    const hasDraft = Object.values(counts).some(value => value !== '');
+    if (hasDraft && !window.confirm('Changing location will clear the unsaved physical counts. Continue?')) return;
+    if (hasDraft) setCounts({});
+    setLocationId(nextLocationId);
+  }
   const locationById = useMemo(() => Object.fromEntries(locations.map(row => [row.id, row])), [locations]);
   const balanceByKey = useMemo(() => {
     const map = {};
@@ -116,16 +137,22 @@ export default function StockSection({ products = [], onChanged }) {
     if (!reason.trim()) return setError('A reason is required for the stock history.');
     setSaving(true);
     try {
+      const adjustments = [{ product_id: productId, location_id: locationId, mode: operation, quantity: amount }];
       await ok(sb.rpc('apply_stock_adjustments', {
-        p_request_id: makeRequestId(),
-        p_adjustments: [{ product_id: productId, location_id: locationId, mode: operation, quantity: amount }],
+        p_request_id: requestForPayload(adjustmentRequestRef, { adjustments, reason: reason.trim() }),
+        p_adjustments: adjustments,
         p_reason: reason.trim()
       }));
+      adjustmentRequestRef.current = null;
       setQuantity('');
       setReason('');
       setMessage('Stock updated and movement recorded.');
-      await load();
-      if (onChanged) await onChanged();
+      try {
+        await load();
+        if (onChanged) await onChanged();
+      } catch (refreshError) {
+        setError('Stock was saved, but the product list could not be refreshed: ' + (refreshError.message || refreshError));
+      }
     } catch (e2) {
       setError('Stock update failed: ' + (e2.message || e2));
     } finally {
@@ -156,14 +183,19 @@ export default function StockSection({ products = [], onChanged }) {
     setSaving(true);
     try {
       await ok(sb.rpc('apply_stock_adjustments', {
-        p_request_id: makeRequestId(),
+        p_request_id: requestForPayload(reconciliationRequestRef, { adjustments, reason: 'Physical stock reconciliation' }),
         p_adjustments: adjustments,
         p_reason: 'Physical stock reconciliation'
       }));
+      reconciliationRequestRef.current = null;
       setCounts({});
       setMessage(`Reconciled ${adjustments.length} product(s). Stock history has been updated.`);
-      await load();
-      if (onChanged) await onChanged();
+      try {
+        await load();
+        if (onChanged) await onChanged();
+      } catch (refreshError) {
+        setError('Counts were saved, but the product list could not be refreshed: ' + (refreshError.message || refreshError));
+      }
     } catch (e2) {
       setError('Reconciliation failed; no partial changes were saved. ' + (e2.message || e2));
     } finally {
@@ -191,7 +223,7 @@ export default function StockSection({ products = [], onChanged }) {
       <div className="admin-card">
         <h3 style={{ marginTop: 0 }}>Locations / racks</h3>
         <div className="tools">
-          <select value={locationId} onChange={e => setLocationId(e.target.value)} aria-label="Selected stock location">
+          <select value={locationId} onChange={e => changeLocation(e.target.value)} aria-label="Selected stock location">
             <option value="">Select location</option>
             {locations.map(location => <option key={location.id} value={location.id}>{location.name}</option>)}
           </select>
@@ -214,7 +246,7 @@ export default function StockSection({ products = [], onChanged }) {
               </select>
             </label>
             <label>Location
-              <select value={locationId} onChange={e => setLocationId(e.target.value)} required>
+              <select value={locationId} onChange={e => changeLocation(e.target.value)} required>
                 <option value="">Select location</option>
                 {locations.map(location => <option key={location.id} value={location.id}>{location.name}</option>)}
               </select>
