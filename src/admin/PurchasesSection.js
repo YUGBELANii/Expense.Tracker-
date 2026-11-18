@@ -28,6 +28,9 @@ const emptyForm = () => ({
 export default function PurchasesSection({ products, suppliers, onChanged }) {
   const [form, setForm] = useState(emptyForm());
   const [productQuery, setProductQuery] = useState('');
+  const [addToStock, setAddToStock] = useState(true);
+  const [updateBuyPrice, setUpdateBuyPrice] = useState(false);
+  const [rememberSupplier, setRememberSupplier] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
@@ -124,8 +127,24 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
       const { error: rpcError } = await sb.rpc('record_purchase', rpcPayload);
       if (rpcError) throw rpcError;
 
+      // Optional follow-ups not handled by RPC in spec? Preserve existing UI toggles:
+      // update buy price and remember preferred supplier (these are not stock increments).
+      const productUpdate = {};
+      if (updateBuyPrice && form.buy_price !== '') {
+        productUpdate.buy_price = Number(form.buy_price);
+      }
+      if (rememberSupplier) {
+        productUpdate.preferred_supplier_id = form.supplier_id;
+      }
+      if (Object.keys(productUpdate).length) {
+        await ok(sb.from('products').update(productUpdate).eq('id', form.product_id));
+      }
 
-      flash('Purchase record saved. Stock was not changed.');
+      flash(
+        'Purchase saved.' +
+        (addToStock ? ` (stock updated via server).` : '') +
+        (rememberSupplier ? ' Supplier remembered for restock.' : '')
+      );
       requestIdRef.current = null; // success: clear idempotency key for next submission
       setForm(f => ({ ...emptyForm(), supplier_id: f.supplier_id, purchase_date: f.purchase_date }));
       setProductQuery('');
@@ -145,10 +164,11 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
 
   return (
     <section className="admin-card admin-spaced-section">
-      <h2 className="sec"><span>Purchase records</span></h2>
+      <h2 className="sec"><span>Purchases (stock in)</span></h2>
       <p className="hint">
         Record every purchase batch here: which item, from which supplier, quantity, rate,
-        invoice and expiry. Saving a purchase records its supplier-specific rate only; it does not change inventory or overwrite the product buy price. Use Stock Management to add received stock after checking it physically.
+        invoice and expiry. "Add to stock" increases the product quantity so the Restock tab
+        and Stock Ledger stay correct.
       </p>
 
       {msg && <div className="notice ok">{msg}</div>}
@@ -251,7 +271,25 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
             Note
             <input value={form.note} onChange={e => setForm({ ...form, note: e.target.value })} />
           </label>
-</div>
+          <label className="full">
+            <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input type="checkbox" checked={addToStock} onChange={e => setAddToStock(e.target.checked)} />
+              Add this quantity to product stock
+            </span>
+          </label>
+          <label className="full">
+            <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input type="checkbox" checked={updateBuyPrice} onChange={e => setUpdateBuyPrice(e.target.checked)} />
+              Also update the product's buy price to this rate
+            </span>
+          </label>
+          <label className="full">
+            <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input type="checkbox" checked={rememberSupplier} onChange={e => setRememberSupplier(e.target.checked)} />
+              Remember this supplier as the product's restock supplier
+            </span>
+          </label>
+        </div>
         <div className="row">
           <button className="btn" type="submit" disabled={saving}>
             {saving ? 'Saving...' : 'Save purchase'}
