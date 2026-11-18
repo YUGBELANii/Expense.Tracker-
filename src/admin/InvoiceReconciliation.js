@@ -11,7 +11,7 @@ function parseCsv(text) {
     const ch = source[i];
     if (ch === '"' && quoted && source[i + 1] === '"') { cell += '"'; i += 1; }
     else if (ch === '"') quoted = !quoted;
-    else if (ch === ',' && !quoted) { row.push(cell.trim()); cell = ''; }
+    else if (ch === delimiter && !quoted) { row.push(cell.trim()); cell = ''; }
     else if ((ch === '\\n' || ch === '\\r') && !quoted) {
       if (ch === '\\r' && source[i + 1] === '\\n') i += 1;
       row.push(cell.trim()); cell = '';
@@ -51,7 +51,7 @@ function parseCsv(text) {
 
 function toCsv(rows, products) {
   const quote = value => '"' + String(value ?? '').replace(/"/g, '""') + '"';
-  const header = ['Invoice item', 'Matched product', 'Quantity', 'Invoice rate', 'Database buy price', 'Rate difference', 'Invoice line total', 'Estimated gross margin at current sell price'];
+  const header = ['Invoice item', 'Matched product', 'Quantity', 'Invoice rate', 'Database buy price', 'Rate difference', 'Invoice line total', 'Potential gross margin if all invoice quantity sells at current price'];
   const lines = rows.map(row => {
     const product = products.find(item => item.id === row.productId);
     const db = Number(product?.buy_price);
@@ -167,8 +167,8 @@ export default function InvoiceReconciliation({ products = [] }) {
           <small>Expected columns: Product/Item, Quantity, and Unit Price/Rate or Amount/Total. Barcode is supported.</small>
         </label>
         <label className="full">
-          Or paste invoice rows (CSV text with a header)
-          <textarea rows={5} value={manualText} onChange={e => setManualText(e.target.value)} placeholder={'Product,Quantity,Unit Price,Amount\\nDairy Milk,10,20,200\\nFace Wash,2,95,190'} />
+          Or paste invoice rows (CSV / tab / pipe-separated text with a header)
+          <textarea rows={5} value={manualText} onChange={e => setManualText(e.target.value)} placeholder={'Product | Quantity | Unit Price | Amount\\nDairy Milk | 10 | 20 | 200\\nFace Wash | 2 | 95 | 190'} />
         </label>
       </div>
       <div className="row" style={{ gap: 10, marginTop: 10 }}>
@@ -182,12 +182,12 @@ export default function InvoiceReconciliation({ products = [] }) {
             <div className="admin-card"><small>Invoice line value</small><h3>{money(summary.invoiceTotal)}</h3></div>
             <div className="admin-card"><small>Matched / total lines</small><h3>{summary.matched} / {summary.lines}</h3></div>
             <div className="admin-card"><small>Invoice cost vs DB buy price</small><h3>{money(summary.variance)}</h3><small>Positive = invoice cost higher than database rate</small></div>
-            <div className="admin-card"><small>Estimated gross margin</small><h3>{money(summary.margin)}</h3><small>Based on current sell prices and invoice quantities</small></div>
+            <div className="admin-card"><small>Potential gross margin*</small><h3>{money(summary.margin)}</h3><small>Assumes every purchased unit sells at today's price</small></div>
           </div>
           {summary.unmatched > 0 && <div className="notice bad">{summary.unmatched} line(s) are unmatched. Match them below before relying on totals.</div>}
           <div className="wrap dt">
             <table>
-              <thead><tr><th>Invoice item</th><th>Database product match</th><th>Qty</th><th>Invoice rate</th><th>DB buy rate</th><th>Difference / unit</th><th>Estimated margin</th></tr></thead>
+              <thead><tr><th>Invoice item</th><th>Database product match</th><th>Qty</th><th>Invoice rate</th><th>DB buy rate</th><th>Difference / unit</th><th>Potential margin</th></tr></thead>
               <tbody>
                 {enriched.map(row => (
                   <tr key={row.rowId}>
@@ -209,7 +209,7 @@ export default function InvoiceReconciliation({ products = [] }) {
             </table>
           </div>
           <p className="hint">
-            {sourceName ? 'Source: ' + sourceName + '. ' : ''}This audit does not alter purchases, stock, product prices, or profit records. Estimated gross margin is not realized profit: actual profit requires verified sales quantities, discounts, returns, and operating costs. Invoice and database rates must use the same unit/package basis.
+            {sourceName ? 'Source: ' + sourceName + '. ' : ''}This audit does not alter purchases, stock, product prices, or profit records. Potential gross margin assumes every purchased unit sells at today's price; it is not realized profit. Actual profit requires verified sales quantities, discounts, returns, and operating costs. Invoice and database rates must use the same unit/package basis.
           </p>
         </>
       )}
