@@ -94,7 +94,11 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
     setErr('');
     const qty = Number(form.quantity);
     if (!form.product_id) { setErr('Choose a product.'); return; }
-    if (!(qty > 0)) { setErr('Quantity must be more than zero.'); return; }
+    if (!Number.isFinite(qty) || qty <= 0) { setErr('Quantity must be a finite number greater than zero.'); return; }
+    if (form.buy_price !== '') {
+      const price = Number(form.buy_price);
+      if (!Number.isFinite(price) || price < 0) { setErr('Buy price must be a valid non-negative number.'); return; }
+    }
     if (!form.purchase_date) { setErr('Choose the purchase date.'); return; }
     if (form.manufacturing_date && form.expiry_date && form.expiry_date < form.manufacturing_date) {
       setErr('Expiry date cannot be earlier than manufacturing date.');
