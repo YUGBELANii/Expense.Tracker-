@@ -105,6 +105,26 @@ export default function StockSection({ products = [], onChanged }) {
     .filter(row => row.location_id === locationId)
     .reduce((sum, row) => sum + number(row.quantity), 0);
 
+  const countSummary = useMemo(() => {
+    const entered = products.filter(product =>
+      Object.prototype.hasOwnProperty.call(counts, product.id) && counts[product.id] !== ''
+    );
+    const systemTotal = entered.reduce(
+      (sum, product) => sum + number(balanceByKey[product.id + ':' + locationId]),
+      0
+    );
+    const physicalTotal = entered.reduce(
+      (sum, product) => sum + Number(counts[product.id]),
+      0
+    );
+    return {
+      products: entered.length,
+      systemTotal,
+      physicalTotal,
+      difference: physicalTotal - systemTotal
+    };
+  }, [products, counts, balanceByKey, locationId]);
+
   async function createLocation(e) {
     e.preventDefault();
     const name = rackName.trim();
@@ -299,6 +319,14 @@ export default function StockSection({ products = [], onChanged }) {
             </tbody>
           </table>
         </div>
+        {countSummary.products > 0 && (
+          <div className="totals" aria-live="polite">
+            <div className="tot"><span>Products counted</span><b>{countSummary.products}</b></div>
+            <div className="tot"><span>System total</span><b>{countSummary.systemTotal.toLocaleString('en-IN')}</b></div>
+            <div className="tot"><span>Physical total</span><b>{countSummary.physicalTotal.toLocaleString('en-IN')}</b></div>
+            <div className="tot"><span>Net difference</span><b className={countSummary.difference < 0 ? 'neg' : countSummary.difference > 0 ? 'pos' : ''}>{countSummary.difference > 0 ? '+' : ''}{countSummary.difference.toLocaleString('en-IN')}</b></div>
+          </div>
+        )}
         <div className="row" style={{ marginTop: 12 }}>
           <button className="btn ghost" type="button" onClick={() => setCounts({})} disabled={saving}>Clear draft</button>
           <button className="btn" type="button" onClick={saveReconciliation} disabled={saving || !Object.values(counts).some(value => value !== '')}>{saving ? 'Applying…' : `Review & apply counts (${Object.values(counts).filter(value => value !== '').length})`}</button>
