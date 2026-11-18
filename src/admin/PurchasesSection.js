@@ -23,14 +23,10 @@ const emptyForm = () => ({
   note: ''
 });
 
-// Record a stock purchase: which product, from which supplier, how much,
-// at what price, with optional invoice/batch/expiry details.
+// Record purchase history only. Stock changes remain manual in Stock Management.
 export default function PurchasesSection({ products, suppliers, onChanged }) {
   const [form, setForm] = useState(emptyForm());
   const [productQuery, setProductQuery] = useState('');
-  const [addToStock, setAddToStock] = useState(true);
-  const [updateBuyPrice, setUpdateBuyPrice] = useState(false);
-  const [rememberSupplier, setRememberSupplier] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
@@ -40,13 +36,17 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
   const [batchSupplierFilter, setBatchSupplierFilter] = useState('');
 
   const requestIdRef = React.useRef(null);
-  function getRequestId() {
-    if (!requestIdRef.current) {
-      requestIdRef.current = (typeof crypto !== 'undefined' && crypto.randomUUID)
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  function getRequestId(payload) {
+    const signature = JSON.stringify(payload);
+    if (!requestIdRef.current || requestIdRef.current.signature !== signature) {
+      requestIdRef.current = {
+        id: (typeof crypto !== 'undefined' && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        signature
+      };
     }
-    return requestIdRef.current;
+    return requestIdRef.current.id;
   }
 
   const flash = text => {
@@ -97,7 +97,11 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
     setErr('');
     const qty = Number(form.quantity);
     if (!form.product_id) { setErr('Choose a product.'); return; }
-    if (!(qty > 0)) { setErr('Quantity must be more than zero.'); return; }
+    if (!Number.isFinite(qty) || qty <= 0) { setErr('Quantity must be a finite number greater than zero.'); return; }
+    if (form.buy_price !== '') {
+      const price = Number(form.buy_price);
+      if (!Number.isFinite(price) || price < 0) { setErr('Buy price must be a valid non-negative number.'); return; }
+    }
     if (!form.purchase_date) { setErr('Choose the purchase date.'); return; }
     if (form.manufacturing_date && form.expiry_date && form.expiry_date < form.manufacturing_date) {
       setErr('Expiry date cannot be earlier than manufacturing date.');
@@ -105,12 +109,11 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
     }
 
     setSaving(true);
+    let purchaseSaved = false;
     try {
       if (!sb) throw new Error('Supabase is not configured.');
 
-      const requestId = getRequestId();
-      const rpcPayload = {
-        p_request_id: requestId,
+      const purchaseDetails = {
         p_product_id: form.product_id,
         p_quantity: qty,
         p_buy_price: form.buy_price === '' ? null : Number(form.buy_price),
@@ -122,37 +125,27 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
         p_expiry_date: form.expiry_date || null,
         p_note: form.note.trim() || null
       };
+      const requestId = getRequestId(purchaseDetails);
+      const rpcPayload = { p_request_id: requestId, ...purchaseDetails };
 
-      // Call atomic RPC (handles purchase batch + stock increment/idempotency per DB)
+      // Call the atomic purchase-history RPC. It never changes stock.
       const { error: rpcError } = await sb.rpc('record_purchase', rpcPayload);
       if (rpcError) throw rpcError;
+      purchaseSaved = true;
 
-      // Optional follow-ups not handled by RPC in spec? Preserve existing UI toggles:
-      // update buy price and remember preferred supplier (these are not stock increments).
-      const productUpdate = {};
-      if (updateBuyPrice && form.buy_price !== '') {
-        productUpdate.buy_price = Number(form.buy_price);
-      }
-      if (rememberSupplier) {
-        productUpdate.preferred_supplier_id = form.supplier_id;
-      }
-      if (Object.keys(productUpdate).length) {
-        await ok(sb.from('products').update(productUpdate).eq('id', form.product_id));
-      }
-
-      flash(
-        'Purchase saved.' +
-        (addToStock ? ` (stock updated via server).` : '') +
-        (rememberSupplier ? ' Supplier remembered for restock.' : '')
-      );
-      requestIdRef.current = null; // success: clear idempotency key for next submission
-      setForm(f => ({ ...emptyForm(), supplier_id: f.supplier_id, purchase_date: f.purchase_date }));
+      requestIdRef.current = null; // purchase committed; next submission gets a fresh key
+      flash('Purchase record saved. Stock was not changed.');
+      const previousSupplier = form.supplier_id;
+      const previousDate = form.purchase_date;
+      setForm({ ...emptyForm(), supplier_id: previousSupplier, purchase_date: previousDate });
       setProductQuery('');
       await loadBatches();
       if (onChanged) await onChanged();
     } catch (er) {
-      // Do NOT clear requestIdRef on failure so a retry reuses the same request_id (idempotency)
-      setErr('Could not save purchase: ' + (er.message || er));
+      // Keep the same request ID when the database did not confirm the purchase.
+      setErr(purchaseSaved
+        ? 'Purchase was saved, but the screen could not refresh. Reload to see the saved record. ' + (er.message || er)
+        : 'Could not save purchase: ' + (er.message || er));
     } finally {
       setSaving(false);
     }
@@ -162,13 +155,48 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
     ? batches.filter(b => b.supplier_id === batchSupplierFilter)
     : batches;
 
+  // Compare the latest recorded rate for each product/supplier pair.
+  // This is historical invoice data, not a live supplier quotation.
+  const supplierPriceRows = useMemo(() => {
+    const latestByPair = new Map();
+    batches.forEach(batch => {
+      if (batch.buy_price === null || batch.buy_price === undefined) return;
+      const key = `${batch.product_id}:${batch.supplier_id || 'none'}`;
+      if (!latestByPair.has(key)) {
+        latestByPair.set(key, {
+          productId: batch.product_id,
+          productName: batch.products?.name || 'Unknown product',
+          supplierId: batch.supplier_id,
+          supplierName: batch.suppliers?.name || 'No supplier',
+          price: Number(batch.buy_price),
+          purchaseDate: batch.purchase_date,
+          batchNumber: batch.batch_number
+        });
+      }
+    });
+    const rows = [...latestByPair.values()];
+    const lowestByProduct = {};
+    rows.forEach(row => {
+      lowestByProduct[row.productId] = Math.min(
+        lowestByProduct[row.productId] ?? Infinity,
+        row.price
+      );
+    });
+    return rows
+      .map(row => ({
+        ...row,
+        lowest: row.price === lowestByProduct[row.productId],
+        difference: row.price - lowestByProduct[row.productId]
+      }))
+      .sort((a, b) => a.productName.localeCompare(b.productName) || a.price - b.price);
+  }, [batches]);
+
   return (
     <section className="admin-card admin-spaced-section">
-      <h2 className="sec"><span>Purchases (stock in)</span></h2>
+      <h2 className="sec"><span>Purchase records</span></h2>
       <p className="hint">
         Record every purchase batch here: which item, from which supplier, quantity, rate,
-        invoice and expiry. "Add to stock" increases the product quantity so the Restock tab
-        and Stock Ledger stay correct.
+        invoice and expiry. Saving a purchase records its supplier-specific rate only; it does not change inventory or overwrite the product buy price. Use Stock Management to add received stock after checking it physically.
       </p>
 
       {msg && <div className="notice ok">{msg}</div>}
@@ -271,31 +299,40 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
             Note
             <input value={form.note} onChange={e => setForm({ ...form, note: e.target.value })} />
           </label>
-          <label className="full">
-            <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input type="checkbox" checked={addToStock} onChange={e => setAddToStock(e.target.checked)} />
-              Add this quantity to product stock
-            </span>
-          </label>
-          <label className="full">
-            <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input type="checkbox" checked={updateBuyPrice} onChange={e => setUpdateBuyPrice(e.target.checked)} />
-              Also update the product's buy price to this rate
-            </span>
-          </label>
-          <label className="full">
-            <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input type="checkbox" checked={rememberSupplier} onChange={e => setRememberSupplier(e.target.checked)} />
-              Remember this supplier as the product's restock supplier
-            </span>
-          </label>
-        </div>
+</div>
         <div className="row">
           <button className="btn" type="submit" disabled={saving}>
             {saving ? 'Saving...' : 'Save purchase'}
           </button>
         </div>
       </form>
+
+      <h3 className="sec"><span>Supplier price comparison</span></h3>
+      <p className="hint">
+        Latest recorded purchase rate per supplier and product, based on the most recent 300 purchase records. Lowest recorded rate is highlighted; confirm current availability and quote before ordering.
+      </p>
+      <div className="wrap dt">
+        <table>
+          <thead>
+            <tr><th>Product</th><th>Supplier</th><th>Latest rate</th><th>Purchase date</th><th>Above lowest</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            {supplierPriceRows.map(row => (
+              <tr key={row.productId + ':' + (row.supplierId || 'none')}>
+                <td>{row.productName}</td>
+                <td>{row.supplierName}</td>
+                <td>{inr(row.price)}</td>
+                <td>{row.purchaseDate}</td>
+                <td>{row.difference > 0 ? '+' + inr(row.difference) : '—'}</td>
+                <td>{row.lowest ? <span className="tag ok">Lowest recorded</span> : 'Higher'}</td>
+              </tr>
+            ))}
+            {supplierPriceRows.length === 0 && (
+              <tr><td colSpan={6} className="empty">No supplier price history yet. Record purchases with a supplier and buy price to compare rates.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
       <h3 className="sec">
         <span>Recent purchases</span>

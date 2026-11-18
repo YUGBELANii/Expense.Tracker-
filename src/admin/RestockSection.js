@@ -26,6 +26,8 @@ export default function RestockSection({ products, suppliers, brands, manufactur
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const [thresholdDrafts, setThresholdDrafts] = useState({});
+  const [orderQtyDrafts, setOrderQtyDrafts] = useState({});
+  const [excludedRestockItems, setExcludedRestockItems] = useState({});
   const [supplierDrafts, setSupplierDrafts] = useState({});
   const [savingProductId, setSavingProductId] = useState(null);
   const [showThresholdEditor, setShowThresholdEditor] = useState(false);
@@ -104,10 +106,26 @@ export default function RestockSection({ products, suppliers, brands, manufactur
     return list;
   }, [items, restockSearch, restockCategory, restockSupplierFilter, restockSort]);
 
-  const groups = useMemo(
-    () => groupBySupplier(filteredItems, (suppliers || []).filter(s => s.active)),
-    [filteredItems, suppliers]
+  const selectedRestockItems = useMemo(
+    () => filteredItems
+      .filter(item => !excludedRestockItems[item.productId])
+      .map(item => ({
+        ...item,
+        suggestedQty: orderQtyDrafts[item.productId] !== undefined
+          ? (orderQtyDrafts[item.productId] === '' ? null : Number(orderQtyDrafts[item.productId]))
+          : item.suggestedQty
+      })),
+    [filteredItems, excludedRestockItems, orderQtyDrafts]
   );
+
+  const groups = useMemo(
+    () => groupBySupplier(selectedRestockItems, (suppliers || []).filter(s => s.active)),
+    [selectedRestockItems, suppliers]
+  );
+  const invalidOrderQty = selectedRestockItems.some(item => {
+    const raw = orderQtyDrafts[item.productId];
+    return raw !== undefined && raw !== '' && (!Number.isFinite(Number(raw)) || Number(raw) <= 0);
+  });
 
   const outCount = items.filter(i => i.state === 'out').length;
   const lowCount = items.length - outCount;
@@ -119,7 +137,7 @@ export default function RestockSection({ products, suppliers, brands, manufactur
     try {
       if (!sb) throw new Error('Supabase is not configured.');
       const value = raw === '' || raw === undefined ? null : Number(raw);
-      if (value !== null && !(value >= 0)) throw new Error('Threshold must be zero or more.');
+      if (value !== null && (!Number.isFinite(value) || value < 0)) throw new Error('Threshold must be a finite number zero or more.');
       await ok(sb.from('products').update({ low_stock_threshold: value }).eq('id', productId));
       flash('Low-stock level saved.');
       if (onChanged) await onChanged();
@@ -148,6 +166,10 @@ export default function RestockSection({ products, suppliers, brands, manufactur
   }
 
   async function copyMessage(group) {
+    if (invalidOrderQty) {
+      setErr('Every custom order quantity must be a finite number greater than zero. Uncheck an item to leave it out.');
+      return;
+    }
     const text = buildRestockMessage(group);
     try {
       await navigator.clipboard.writeText(text);
@@ -220,6 +242,12 @@ export default function RestockSection({ products, suppliers, brands, manufactur
       {items.length > 0 && filteredItems.length === 0 && !loadingBatches && (
         <div className="pad">No items match your search/filter.</div>
       )}
+      {filteredItems.length > 0 && selectedRestockItems.length === 0 && (
+        <div className="pad">All matching items are excluded from the current restock order.</div>
+      )}
+      {invalidOrderQty && (
+        <div className="notice bad">Fix custom order quantities (must be greater than zero) or exclude those items before generating supplier orders.</div>
+      )}
 
       {groups.map(group => {
         const message = buildRestockMessage(group);
@@ -232,7 +260,7 @@ export default function RestockSection({ products, suppliers, brands, manufactur
                 {group.contactPerson ? ` · ${group.contactPerson}` : ''}
               </b>
               <div className="act">
-                {group.supplierId && (
+                {group.supplierId && !invalidOrderQty && (
                   <a
                     className="btn small"
                     href={waLink}
@@ -243,7 +271,7 @@ export default function RestockSection({ products, suppliers, brands, manufactur
                     WhatsApp order
                   </a>
                 )}
-                <button className="btn ghost small" type="button" onClick={() => copyMessage(group)}>
+                <button className="btn ghost small" type="button" disabled={invalidOrderQty} onClick={() => copyMessage(group)}>
                   Copy list
                 </button>
               </div>
@@ -260,6 +288,7 @@ export default function RestockSection({ products, suppliers, brands, manufactur
                     <th>Manufacturer</th>
                     <th>Left</th>
                     <th>Threshold</th>
+                    <th>Include</th>
                     <th>Order qty</th>
                     <th>Last rate</th>
                     <th>Last bought</th>
@@ -278,7 +307,25 @@ export default function RestockSection({ products, suppliers, brands, manufactur
                       <td>{item.manufacturerName || '–'}</td>
                       <td>{item.quantity} {item.unit}</td>
                       <td>{item.threshold ?? DEFAULT_LOW_STOCK_THRESHOLD}</td>
-                      <td>{item.suggestedQty ? `${item.suggestedQty} ${item.unit}` : 'ask supplier'}</td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={!excludedRestockItems[item.productId]}
+                          onChange={e => setExcludedRestockItems(current => ({ ...current, [item.productId]: !e.target.checked }))}
+                          aria-label={`Include ${item.name} in restock order`}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          style={{ maxWidth: 110 }}
+                          value={orderQtyDrafts[item.productId] ?? (item.suggestedQty ?? '')}
+                          onChange={e => setOrderQtyDrafts(current => ({ ...current, [item.productId]: e.target.value }))}
+                          aria-label={`Order quantity for ${item.name}`}
+                        />
+                      </td>
                       <td>{item.lastBuyPrice != null ? inr(item.lastBuyPrice) : '–'}</td>
                       <td>{item.lastPurchaseDate || '–'}{item.lastBatchNumber ? ` (batch ${item.lastBatchNumber})` : ''}{item.lastExpiryDate ? ` exp ${item.lastExpiryDate}` : ''}</td>
                       <td>

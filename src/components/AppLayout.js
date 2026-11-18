@@ -25,6 +25,7 @@ export default function AppLayout({ children }) {
   const adminNav = [
     { to: '/admin/partners', label: 'Partners', icon: '👥' },
     { to: '/admin/products', label: 'Products', icon: '📋' },
+    { to: '/admin/stock', label: 'Stock Management', icon: '📦' },
     { to: '/admin/suppliers', label: 'Suppliers', icon: '🏭' },
     { to: '/admin/purchases', label: 'Purchases', icon: '🧾' },
     { to: '/admin/restock', label: 'Restock', icon: '🔔' },
