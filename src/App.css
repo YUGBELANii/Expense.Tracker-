@@ -423,3 +423,107 @@ tbody tr:hover { background: #fafcf9; }
   background-position: right 12px center;
   background-size: 16px;
 }
+
+
+/* Navigation hide / restore controls */
+.app-sidebar-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.app-sidebar-hide,
+.app-nav-reopen {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: .84rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.app-sidebar-hide { padding: 6px 9px; flex-shrink: 0; }
+.app-sidebar-hide:hover,
+.app-nav-reopen:hover { background: var(--paper); border-color: #b7c5b9; }
+.app-nav-reopen { align-self: flex-start; margin: 12px 0 0 16px; padding: 7px 12px; }
+.app-sidebar.desktop-hidden { display: none; }
+.app-sidebar.desktop-hidden + .app-main { min-width: 0; }
+.app-sidebar-hide:focus-visible,
+.app-nav-reopen:focus-visible,
+.app-mobile-bar button:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+
+/* Responsive workspace: avoid page-level horizontal overflow and keep controls usable */
+.app-main-inner { min-width: 0; overflow-x: clip; }
+.app-main-inner > * { min-width: 0; max-width: 100%; }
+.app-main-inner .wrap,
+.app-main-inner .dt,
+.app-main-inner .ledger-wrap { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.app-main-inner .tools,
+.app-main-inner .row,
+.app-main-inner .sec,
+.app-main-inner .page-header { min-width: 0; }
+.app-main-inner input,
+.app-main-inner select,
+.app-main-inner textarea { max-width: 100%; }
+.app-main-inner .tools input { min-width: min(180px, 100%); }
+.app-main-inner .pcards { grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); }
+.app-main-inner .grid { min-width: 0; }
+.app-main-inner .act { flex-wrap: wrap; }
+.app-main-inner .act .btn { white-space: nowrap; }
+
+@media (max-width: 900px) {
+  .app-sidebar.desktop-hidden { display: flex; }
+  .app-sidebar-hide { min-height: 42px; }
+  .app-sidebar { width: min(300px, 86vw); max-width: 86vw; padding: 14px 12px; }
+  .app-sidebar-brand { font-size: 1.05rem; }
+  .app-nav a, .app-nav button { min-height: 44px; padding: 11px 12px; }
+  .app-mobile-bar { min-height: 56px; padding: 8px 14px; }
+  .app-mobile-bar button { min-width: 44px; min-height: 44px; border-radius: 9px; }
+  .app-nav-reopen { display: none; }
+  .app-main-inner { width: 100%; }
+}
+@media (max-width: 600px) {
+  main { padding: 12px 10px 28px; }
+  .app-main-inner { padding: 12px 10px 28px !important; }
+  .app-main-inner h1 { font-size: clamp(1.35rem, 6vw, 1.7rem); }
+  .app-main-inner h2 { font-size: 1.2rem; }
+  .app-main-inner .page-header { align-items: stretch; gap: 10px; }
+  .app-main-inner .page-header > .row,
+  .app-main-inner .page-header > .btn,
+  .app-main-inner .page-header > a.btn { width: 100%; }
+  .app-main-inner .tools { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .app-main-inner .tools > *,
+  .app-main-inner .tools input,
+  .app-main-inner .tools select { width: 100%; min-width: 0; }
+  .app-main-inner .grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .app-main-inner .grid .full { grid-column: auto; }
+  .app-main-inner .row { gap: 9px; }
+  .app-main-inner .row .btn { min-height: 44px; }
+  .app-main-inner .admin-card { padding: 14px; margin-top: 12px; }
+  .app-main-inner .sec { align-items: flex-start; gap: 10px; font-size: 1.05rem; }
+  .app-main-inner .sec select { max-width: 100%; }
+  .app-main-inner .pcards { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .app-main-inner .pcard { min-width: 0; padding: 14px; }
+  .app-main-inner .wrap { border-radius: 9px; }
+  .app-main-inner table { min-width: 680px; }
+  .app-main-inner .wrap th,
+  .app-main-inner .wrap td { padding: 10px 11px; }
+  .app-main-inner dialog { width: calc(100vw - 20px); max-width: 560px; max-height: 88dvh; }
+  .app-main-inner dialog .f { padding: 16px; }
+  .app-main-inner .act { justify-content: flex-start; }
+  .app-main-inner .act .btn { flex: 1 1 auto; }
+  .category-assigner-selection { align-items: stretch; }
+  .category-assigner-selection .btn { flex: 1 1 auto; }
+}
+@media (max-width: 380px) {
+  .app-sidebar { width: 88vw; }
+  .app-main-inner { padding-left: 8px !important; padding-right: 8px !important; }
+  .app-main-inner .admin-card { padding: 12px; }
+  .app-main-inner .row .btn { width: 100%; }
+}
