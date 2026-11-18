@@ -1,19 +1,21 @@
 import React, { useMemo, useState } from 'react';
 
 const money = value => '₹' + Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
-const norm = value => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\\s+/g, ' ');
+const norm = value => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
 
 function parseCsv(text) {
   const rows = [];
   let row = [], cell = '', quoted = false;
-  const source = String(text || '').replace(/^\\uFEFF/, '');
+  const source = String(text || '').replace(/^\uFEFF/, '');
+  const firstLine = source.split(/\r?\n/, 1)[0] || '';
+  const delimiter = firstLine.includes('\t') ? '\t' : firstLine.includes('|') ? '|' : ',';
   for (let i = 0; i < source.length; i += 1) {
     const ch = source[i];
     if (ch === '"' && quoted && source[i + 1] === '"') { cell += '"'; i += 1; }
     else if (ch === '"') quoted = !quoted;
     else if (ch === delimiter && !quoted) { row.push(cell.trim()); cell = ''; }
-    else if ((ch === '\\n' || ch === '\\r') && !quoted) {
-      if (ch === '\\r' && source[i + 1] === '\\n') i += 1;
+    else if ((ch === '\n' || ch === '\r') && !quoted) {
+      if (ch === '\r' && source[i + 1] === '\n') i += 1;
       row.push(cell.trim()); cell = '';
       if (row.some(value => value !== '')) rows.push(row);
       row = [];
@@ -34,8 +36,10 @@ function parseCsv(text) {
   if (rateIndex < 0 && totalIndex < 0) throw new Error('CSV needs a Unit Price/Rate or line Total/Amount column.');
   return rows.map((values, index) => {
     const quantity = Number(String(values[qtyIndex] || '').replace(/[,₹ ]/g, ''));
-    const unitRate = rateIndex >= 0 ? Number(String(values[rateIndex] || '').replace(/[₹, ]/g, '')) : NaN;
-    const lineTotal = totalIndex >= 0 ? Number(String(values[totalIndex] || '').replace(/[₹, ]/g, '')) : NaN;
+    const rateText = rateIndex >= 0 ? String(values[rateIndex] || '').replace(/[₹, ]/g, '') : '';
+    const totalText = totalIndex >= 0 ? String(values[totalIndex] || '').replace(/[₹, ]/g, '') : '';
+    const unitRate = rateText.trim() !== '' ? Number(rateText) : NaN;
+    const lineTotal = totalText.trim() !== '' ? Number(totalText) : NaN;
     const rate = Number.isFinite(unitRate) && unitRate >= 0 ? unitRate :
       Number.isFinite(lineTotal) && quantity > 0 ? lineTotal / quantity : NaN;
     return {
@@ -62,7 +66,7 @@ function toCsv(rows, products) {
       row.lineTotal, Number.isFinite(sell) ? (sell - row.invoiceRate) * row.quantity : ''
     ].map(quote).join(',');
   });
-  return [header.map(quote).join(','), ...lines].join('\\n');
+  return [header.map(quote).join(','), ...lines].join('\n');
 }
 
 export default function InvoiceReconciliation({ products = [] }) {
@@ -168,7 +172,7 @@ export default function InvoiceReconciliation({ products = [] }) {
         </label>
         <label className="full">
           Or paste invoice rows (CSV / tab / pipe-separated text with a header)
-          <textarea rows={5} value={manualText} onChange={e => setManualText(e.target.value)} placeholder={'Product | Quantity | Unit Price | Amount\\nDairy Milk | 10 | 20 | 200\\nFace Wash | 2 | 95 | 190'} />
+          <textarea rows={5} value={manualText} onChange={e => setManualText(e.target.value)} placeholder={'Product | Quantity | Unit Price | Amount\nDairy Milk | 10 | 20 | 200\nFace Wash | 2 | 95 | 190'} />
         </label>
       </div>
       <div className="row" style={{ gap: 10, marginTop: 10 }}>
