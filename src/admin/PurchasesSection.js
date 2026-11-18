@@ -23,8 +23,7 @@ const emptyForm = () => ({
   note: ''
 });
 
-// Record a stock purchase: which product, from which supplier, how much,
-// at what price, with optional invoice/batch/expiry details.
+// Record purchase history only. Stock changes remain manual in Stock Management.
 export default function PurchasesSection({ products, suppliers, onChanged }) {
   const [form, setForm] = useState(emptyForm());
   const [productQuery, setProductQuery] = useState('');
@@ -37,13 +36,17 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
   const [batchSupplierFilter, setBatchSupplierFilter] = useState('');
 
   const requestIdRef = React.useRef(null);
-  function getRequestId() {
-    if (!requestIdRef.current) {
-      requestIdRef.current = (typeof crypto !== 'undefined' && crypto.randomUUID)
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  function getRequestId(payload) {
+    const signature = JSON.stringify(payload);
+    if (!requestIdRef.current || requestIdRef.current.signature !== signature) {
+      requestIdRef.current = {
+        id: (typeof crypto !== 'undefined' && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        signature
+      };
     }
-    return requestIdRef.current;
+    return requestIdRef.current.id;
   }
 
   const flash = text => {
@@ -109,9 +112,7 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
     try {
       if (!sb) throw new Error('Supabase is not configured.');
 
-      const requestId = getRequestId();
-      const rpcPayload = {
-        p_request_id: requestId,
+      const purchaseDetails = {
         p_product_id: form.product_id,
         p_quantity: qty,
         p_buy_price: form.buy_price === '' ? null : Number(form.buy_price),
@@ -123,15 +124,19 @@ export default function PurchasesSection({ products, suppliers, onChanged }) {
         p_expiry_date: form.expiry_date || null,
         p_note: form.note.trim() || null
       };
+      const requestId = getRequestId(purchaseDetails);
+      const rpcPayload = { p_request_id: requestId, ...purchaseDetails };
 
-      // Call atomic RPC (handles purchase batch + stock increment/idempotency per DB)
+      // Call the atomic purchase-history RPC. It never changes stock.
       const { error: rpcError } = await sb.rpc('record_purchase', rpcPayload);
       if (rpcError) throw rpcError;
 
 
+      requestIdRef.current = null; // purchase committed; next submission gets a fresh key
       flash('Purchase record saved. Stock was not changed.');
-      requestIdRef.current = null; // success: clear idempotency key for next submission
-      setForm(f => ({ ...emptyForm(), supplier_id: f.supplier_id, purchase_date: f.purchase_date }));
+      const previousSupplier = form.supplier_id;
+      const previousDate = form.purchase_date;
+      setForm({ ...emptyForm(), supplier_id: previousSupplier, purchase_date: previousDate });
       setProductQuery('');
       await loadBatches();
       if (onChanged) await onChanged();
